@@ -8,5 +8,4 @@ shifts = [0, 1, 2, 3]
 
 [camera]
 roi = [0, 0, 800, 800]
-fps = 100
 exposure = 0.00005

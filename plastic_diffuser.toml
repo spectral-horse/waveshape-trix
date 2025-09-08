@@ -9,5 +9,4 @@ shifts = [0, 1, 2, 3]
 [camera]
 outer_roi = [0, 0, 128, 128]
 inner_roi = [48, 48, 20, 20]
-fps = 100
 exposure = 0.01
