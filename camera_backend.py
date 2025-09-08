@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 
 
 
@@ -28,4 +28,11 @@ class CameraBackend(ABC):
     def set_sync_out(self, enabled: bool):
         # Enable or disable the sync out signal of the camera, which should be
         # the signal that goes high when exposure of a frame completes.
+        pass
+
+    @abstractmethod
+    def get_roi(self) -> (int, int, int, int):
+        # Get the region of interest of the camera as a tuple of the form
+        # (x, y, width, height). The width and height must match the width and
+        # height of the frames returned by `stop_aquisition`.
         pass

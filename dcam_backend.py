@@ -31,6 +31,7 @@ class DcamBackend(CameraBackend):
         self.dev.enable_roi(*roi)
         self.dev.set_property("EXPOSURE TIME", exposure)
 
+        self.roi = roi
         self.frame_buffer = None
 
     def __enter__(self):
@@ -41,6 +42,9 @@ class DcamBackend(CameraBackend):
 
     def close(self):
         self.dcam.close()
+
+    def get_roi(self):
+        return self.roi
 
     def start_acquisition(self, n):
         frame_bytes = self.dev.get_property("BUFFER FRAMEBYTES").value
