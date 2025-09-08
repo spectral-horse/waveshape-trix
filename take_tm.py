@@ -5,13 +5,9 @@ parser.add_argument("config", type = FileType("rb"))
 
 args = parser.parse_args()
 
-import gi
-
-gi.require_version("GLib", "2.0")
-
-from gi.repository import GLib as glib
 from shaping_system import ShapingSystem
-from alp import AlpError
+from dcam_backend import DcamBackend
+from alp4 import AlpError
 from PIL import Image
 import hologram
 import numpy as np
@@ -37,7 +33,6 @@ class HologramConfig(BaseModel):
 
 class CameraConfig(BaseModel):
     roi: conlist(NonNegativeInt, min_length = 4, max_length = 4)
-    fps: NonNegativeInt
     exposure: float
 
 class Config(BaseModel):
@@ -49,9 +44,8 @@ class Config(BaseModel):
 
 # Calculate the Tikhonov-regularised inverse of a matrix by SVD
 def tikhonov_invert(mat, alpha):
-    u, s, vh = np.linalg.svd(mat)
+    u, s, vh = np.linalg.svd(mat, full_matrices = False)
     s_inv = np.diag(s/(s**2+alpha**2))
-    s_inv = np.pad(s_inv, [(0, vh.shape[0]-len(s)), (0, u.shape[1]-len(s))])
 
     return vh.conj().T @ s_inv @ u.conj().T
 
@@ -65,23 +59,18 @@ match config.hologram.type:
     case "superpixel": h = hologram.SuperpixelGenerator(config.hologram.order)
 
 shifts = config.hologram.shifts
+camera = DcamBackend(config.camera.roi, config.camera.exposure)
 
 try:
     system = ShapingSystem(
+        camera,
         config.dmd.segments,   # Input DOFs on the DMD
-        h,                     # Hologram generator
-        config.camera.roi,     # Region of interest
-        config.camera.fps,     # Framerate in Hz
-        config.camera.exposure # Exposure time in seconds
+        1000,                  # DMD FPS (>> camera FPS)
+        h                      # Hologram generator
     )
 except AlpError as e:
     print("Couldn't open DMD!")
     print(*e.args)
-
-    exit(1)
-except glib.Error as e:
-    print("Couldn't initialise camera!")
-    print(e.message)
 
     exit(1)
 
@@ -109,7 +98,7 @@ plt.show()
 
 tm = system.measure_tm(ref, shifts, progress = True)
 
-target = np.zeros(system.inner_roi[2:])
+target = np.zeros(system.output_shape)
 #target[8:12, 8:12] = 1
 #target[8, 8] = 1
 target = (np.array(Image.open("Targets/duck_20x20.png"))[:, :, 0] > 0)*1

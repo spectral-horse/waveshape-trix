@@ -1,5 +1,4 @@
-from alp import Alp
-from arv_backend import EosensMini2Backend
+from alp4 import Alp
 from collections import deque
 import hologram
 import numpy as np
@@ -102,24 +101,21 @@ def spinner(width, dt):
 
 
 class ShapingSystem:
-    def __init__(
-        self, segments, hologen, roi, fps, exposure, block_shape = None
-    ):
+    def __init__(self, camera, segments, dmd_fps, hologen, block_shape = None):
         if np.log2(segments)%1 != 0:
             raise ValueError("number of segments must be a power of 2")
 
         alp = Alp("./alp4395.dll")
         dmd = alp.open_device()
         dmd_size = dmd.get_display_size()
-        cam = EosensMini2Backend(roi, fps, exposure)
 
         self.dmd = dmd
-        self.cam = cam
+        self.dmd_fps = dmd_fps
+        self.cam = camera
+        self.roi = camera.get_roi()
         self.template = hologram.make_template_grid(dmd_size[::-1], segments)
         self.hologen = hologen
-        self.roi = roi
         self.block_shape = block_shape
-        self.framerate = fps
 
     @property
     def segments(self):
@@ -137,10 +133,11 @@ class ShapingSystem:
     #     n_images - Number of shots to take
     # Returns the mean intensity image over the specified number of shots.
     def measure_reference(self, n_images):
-        self.cam.set_trigger(False)
+        self.cam.set_sync_out(False)
         self.cam.start_acquisition(n_images)
 
-        time.sleep(n_images/self.framerate)
+        while self.cam.is_acquiring():
+            time.sleep(0.1)
 
         frames = self.cam.stop_acquisition()
 
@@ -155,7 +152,7 @@ class ShapingSystem:
         n = self.hologen.n
         dmd = self.dmd
         segments = self.segments
-        block_shape = self.block_shape
+        n_frames = len(shifts)*segments
 
         phase_mat = gen_phase_mat(shifts, n)
         hadamard = self.hologen.hadamard_template(self.template, shifts)
@@ -163,15 +160,15 @@ class ShapingSystem:
 
         if progress: print("Uploading patterns...")
 
-        seq = make_seq(dmd, hadamard, "binary_topdown", self.framerate, 1)
+        seq = make_seq(dmd, hadamard, "binary_topdown", self.dmd_fps, 1)
         
         if progress: print("Measuring...")
 
-        self.cam.set_trigger(True)
-        self.cam.start_acquisition()
+        self.cam.set_sync_out(True)
+        self.cam.start_acquisition(n_frames)
         seq.start()
 
-        while dmd.is_projecting():
+        while self.cam.is_acquiring():
             time.sleep(0.1)
 
             if progress: 
@@ -180,12 +177,14 @@ class ShapingSystem:
         if progress: print("\nDone")
 
         frames = self.cam.stop_acquisition()
-        tm = np.empty((self.roi[2]*self.roi[3], segments), dtype = "c16")
+        tm = np.empty((self.output_size, segments), dtype = "c16")
 
         for i in range(segments):
             frame_start = i*len(shifts)
             frame_end = (i+1)*len(shifts)
-            tm[:, i] = extract_z(frames[frame_start:frame_end], ref, phase_mat)
+            field = extract_z(frames[frame_start:frame_end], ref, phase_mat)
+
+            tm[:, i] = field.ravel()
 
         seq.free()
 
@@ -203,7 +202,6 @@ class ShapingSystem:
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_field(self, zs, ref, shifts):
         n = self.hologen.n
-        cam = self.cam
 
         phases = np.array(shifts)*2*np.pi/n
         phase_mat = gen_phase_mat(shifts, n)
@@ -212,18 +210,14 @@ class ShapingSystem:
         holo = self.hologen.gen_from_template(self.template, zs)
         holo = hologram.pack_bits(holo)
 
-        seq = make_seq(self.dmd, holo, "binary_topdown", self.framerate, 1)
+        seq = make_seq(self.dmd, holo, "binary_topdown", self.dmd_fps, 1)
 
-        self.cam.set_trigger(True)
+        self.cam.set_sync_out(True)
         self.cam.start_acquisition(len(shifts))
         seq.start()
 
-        while self.dmd.is_projecting():
+        while self.cam.is_acquiring():
             time.sleep(0.1)
-
-        print("Pointless waiting")
-        time.sleep(5)
-        print("Done pointlessly waiting")
 
         frames = self.cam.stop_acquisition()
         field = extract_z(frames, ref, phase_mat)
