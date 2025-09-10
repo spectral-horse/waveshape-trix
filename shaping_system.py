@@ -1,5 +1,8 @@
 from alp4 import Alp
 from collections import deque
+from skimage.measure import block_reduce
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import hologram
 import numpy as np
 import time
@@ -100,10 +103,60 @@ def spinner(width, dt):
 
 
 
+class Reducer(ABC):
+    @abstractmethod
+    def reduce(img: np.ndarray) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def reduced_shape(img_shape: (int, int)) -> (int, int):
+        pass
+
+class NullReducer(Reducer):
+    def reduce(self, img):
+        return img
+
+    def reduced_shape(self, img_shape):
+        return img_shape
+
+@dataclass
+class BlockReducer(Reducer):
+    def __init__(self, nx, ny):
+        self.shape = (ny, nx)
+
+    def reduce(self, img):
+        if img.ndim == 2: shape = self.shape
+        else: shape = (1,)+self.shape
+
+        return block_reduce(img, block_shape = shape, func = np.mean)
+
+    def reduced_shape(self, img_shape):
+        shape_2d = (img_shape[0]//self.shape[0], img_shape[1]//self.shape[1])
+
+        return (1,)*(len(img_shape)-2)+shape_2d
+
+@dataclass
+class SkipReducer(Reducer):
+    def __init__(self, nx, ny):
+        self.nx = nx
+        self.ny = ny
+
+    def reduce(self, img):
+        if img.ndim == 2: return img[::self.ny, ::self.nx]
+        else: return img[:, ::self.ny, ::self.nx]
+
+    def reduced_shape(self, img_shape):
+        shape_2d = (img_shape[0]//self.ny, img_shape[1]//self.nx)
+
+        return (1,)*(len(img_shape)-2)+shape_2d
+
 class ShapingSystem:
-    def __init__(self, camera, segments, dmd_fps, hologen, block_shape = None):
+    def __init__(self, camera, segments, dmd_fps, hologen, reducer = None):
         if np.log2(segments)%1 != 0:
             raise ValueError("number of segments must be a power of 2")
+
+        if reducer is not None and not isinstance(reducer, Reducer):
+            raise TypeError("reducer must be a Reducer")
 
         alp = Alp("./alp4395.dll")
         dmd = alp.open_device()
@@ -115,7 +168,7 @@ class ShapingSystem:
         self.roi = camera.get_roi()
         self.template = hologram.make_template_grid(dmd_size[::-1], segments)
         self.hologen = hologen
-        self.block_shape = block_shape
+        self.reducer = reducer or NullReducer()
 
     @property
     def segments(self):
@@ -123,11 +176,16 @@ class ShapingSystem:
 
     @property
     def output_shape(self):
-        return self.roi[2:]
+        if self.reducer is not None:
+            return self.reducer.reduced_shape(self.roi[2:])
+        else:
+            return self.roi[2:]
 
     @property
     def output_size(self):
-        return self.roi[2]*self.roi[3]
+        h, w = self.output_shape
+
+        return w*h
 
     # Measure the reference beam intensity with no pattern on the DMD.
     #     n_images - Number of shots to take
@@ -140,6 +198,7 @@ class ShapingSystem:
             time.sleep(0.1)
 
         frames = self.cam.stop_acquisition()
+        frames = self.reducer.reduce(frames)
 
         return frames.mean(axis = 0)
 
@@ -177,6 +236,7 @@ class ShapingSystem:
         if progress: print("\nDone")
 
         frames = self.cam.stop_acquisition()
+        frames = self.reducer.reduce(frames)
         tm = np.empty((self.output_size, segments), dtype = "c16")
 
         for i in range(segments):
@@ -220,6 +280,7 @@ class ShapingSystem:
             time.sleep(0.1)
 
         frames = self.cam.stop_acquisition()
+        frames = self.reducer.reduce(frames)
         field = extract_z(frames, ref, phase_mat)
 
         seq.free()

@@ -9,3 +9,4 @@ shifts = [0, 1, 2, 3]
 [camera]
 roi = [0, 0, 800, 800]
 exposure = 0.00005
+reducer = { type = "skip", dx = 40, dy = 40 }

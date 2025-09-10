@@ -5,7 +5,9 @@ parser.add_argument("config", type = FileType("rb"))
 
 args = parser.parse_args()
 
-from shaping_system import ShapingSystem
+print("Loading imports...")
+
+from shaping_system import ShapingSystem, BlockReducer, SkipReducer
 from dcam_backend import DcamBackend
 from alp4 import AlpError
 from PIL import Image
@@ -15,6 +17,7 @@ import matplotlib.pyplot as plt
 from complex_color import imshow_complex
 from pydantic import BaseModel, NonNegativeInt, conlist
 from enum import Enum
+from typing import Optional
 import tomllib
 
 
@@ -31,9 +34,19 @@ class HologramConfig(BaseModel):
     order: NonNegativeInt
     shifts: list[NonNegativeInt]
 
+class ReducerType(str, Enum):
+    BLOCK = "block"
+    SKIP = "skip"
+
+class ReducerConfig(BaseModel):
+    type: ReducerType
+    dx: NonNegativeInt
+    dy: NonNegativeInt
+
 class CameraConfig(BaseModel):
     roi: conlist(NonNegativeInt, min_length = 4, max_length = 4)
     exposure: float
+    reducer: Optional[ReducerConfig] = None
 
 class Config(BaseModel):
     dmd: DmdConfig
@@ -51,28 +64,47 @@ def tikhonov_invert(mat, alpha):
 
 
 
+print("Loading config...")
+
 config_data = tomllib.load(args.config)
 config = Config.model_validate(config_data)
+shifts = config.hologram.shifts
 
 match config.hologram.type:
     case "haskell": h = hologram.HaskellGenerator(config.hologram.order)
     case "superpixel": h = hologram.SuperpixelGenerator(config.hologram.order)
 
-shifts = config.hologram.shifts
+if config.camera.reducer is not None:
+    reducer_dx = config.camera.reducer.dx
+    reducer_dy = config.camera.reducer.dy
+
+    match config.camera.reducer.type:
+        case "block": reducer = BlockReducer(reducer_dx, reducer_dy)
+        case "skip": reducer = SkipReducer(reducer_dx, reducer_dy)
+else:
+    reducer = None
+
+print("Opening camera...")
+
 camera = DcamBackend(config.camera.roi, config.camera.exposure)
+
+print("Initialising system...")
 
 try:
     system = ShapingSystem(
         camera,
         config.dmd.segments,   # Input DOFs on the DMD
         1000,                  # DMD FPS (>> camera FPS)
-        h                      # Hologram generator
+        h,                     # Hologram generator
+        reducer
     )
 except AlpError as e:
     print("Couldn't open DMD!")
     print(*e.args)
 
     exit(1)
+
+print("Measuring reference intensity...")
 
 ref = system.measure_reference(200)
 colors = np.random.randint(0, 256, (system.segments, 3))
@@ -87,7 +119,7 @@ plt.title("DMD template")
 plt.imshow(colors[system.template])
 plt.subplot(2, 2, 2)
 plt.title("Reference intensity")
-plt.imshow(ref, cmap = "gray", vmin = 0, vmax = 255)
+plt.imshow(ref, cmap = "gray", vmin = 0)
 plt.subplot(2, 2, 3)
 plt.title("Random speckle")
 imshow_complex(speckle1)
