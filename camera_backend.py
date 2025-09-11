@@ -36,3 +36,9 @@ class CameraBackend(ABC):
         # (x, y, width, height). The width and height must match the width and
         # height of the frames returned by `stop_aquisition`.
         pass
+
+    @abstractmethod
+    def get_id_string(self) -> str:
+        # Get an arbitrary identification string for this camera. This can be
+        # absolutely anything, but ideally a model name and/or serial number.
+        pass

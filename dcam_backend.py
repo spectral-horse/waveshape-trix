@@ -33,6 +33,7 @@ class DcamBackend(CameraBackend):
 
         self.roi = roi
         self.frame_buffer = None
+        self.model = self.dev.get_model()
 
     def __enter__(self):
         return self
@@ -42,9 +43,6 @@ class DcamBackend(CameraBackend):
 
     def close(self):
         self.dcam.close()
-
-    def get_roi(self):
-        return self.roi
 
     def start_acquisition(self, n):
         frame_bytes = self.dev.get_property("BUFFER FRAMEBYTES").value
@@ -90,3 +88,9 @@ class DcamBackend(CameraBackend):
             self.dev.set_output_trigger_kind(0, DcamOutputKind.PROGRAMMABLE)
         else:
             self.dev.set_output_trigger_kind(0, DcamOutputKind.LOW)
+
+    def get_roi(self):
+        return self.roi
+
+    def get_id_string(self):
+        return self.model
