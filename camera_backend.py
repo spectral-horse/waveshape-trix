@@ -27,7 +27,8 @@ class CameraBackend(ABC):
     @abstractmethod
     def set_sync_out(self, enabled: bool):
         # Enable or disable the sync out signal of the camera, which should be
-        # the signal that goes high when exposure of a frame completes.
+        # a signal that goes LOW when exposure of a frame completes. Therefore
+        # the FALLING edge of this signal will mark the end of each frame.
         pass
 
     @abstractmethod

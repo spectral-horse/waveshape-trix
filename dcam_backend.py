@@ -83,7 +83,7 @@ class DcamBackend(CameraBackend):
         if enabled:
             self.dev.set_output_trigger_period(0, 0.001)
             self.dev.set_output_trigger_delay(0, 0)
-            self.dev.set_output_trigger_polarity(0, DcamPolarity.POSITIVE)
+            self.dev.set_output_trigger_polarity(0, DcamPolarity.NEGATIVE)
             self.dev.set_output_trigger_source(0, DcamSource.READOUT_END)
             self.dev.set_output_trigger_kind(0, DcamOutputKind.PROGRAMMABLE)
         else:

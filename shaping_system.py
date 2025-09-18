@@ -1,4 +1,4 @@
-from alp4 import Alp
+from alp4 import Alp, AlpDataFormat, AlpTrigger
 from collections import deque
 from skimage.measure import block_reduce
 from abc import ABC, abstractmethod
@@ -125,10 +125,14 @@ class BlockReducer(Reducer):
         self.shape = (ny, nx)
 
     def reduce(self, img):
-        if img.ndim == 2: shape = self.shape
-        else: shape = (1,)+self.shape
+        shape = (1,)*(img.ndim-2)+self.shape
+        reduced = block_reduce(img, block_size = shape, func = np.mean)
+        height = img.shape[-2]//self.shape[0]
+        width = img.shape[-1]//self.shape[1]
 
-        return block_reduce(img, block_shape = shape, func = np.mean)
+        # Necessary to slice this because `block_reduce` will include partial
+        # blocks at the edges and we want only full blocks
+        return reduced[..., :height, :width]
 
     def reduced_shape(self, img_shape):
         shape_2d = (img_shape[0]//self.shape[0], img_shape[1]//self.shape[1])
@@ -146,9 +150,10 @@ class SkipReducer(Reducer):
         else: return img[:, ::self.ny, ::self.nx]
 
     def reduced_shape(self, img_shape):
-        shape_2d = (img_shape[0]//self.ny, img_shape[1]//self.nx)
+        height = (img_shape[0]+self.ny-1)//self.ny
+        width = (img_shape[1]+self.nx-1)//self.nx
 
-        return (1,)*(len(img_shape)-2)+shape_2d
+        return (1,)*(len(img_shape)-2)+(height, width)
 
 class ShapingSystem:
     def __init__(self, camera, segments, dmd_fps, hologen, reducer = None):
@@ -158,9 +163,11 @@ class ShapingSystem:
         if reducer is not None and not isinstance(reducer, Reducer):
             raise TypeError("reducer must be a Reducer")
 
-        alp = Alp("./alp4395.dll")
+        alp = Alp()
         dmd = alp.open_device()
         dmd_size = dmd.get_display_size()
+
+        dmd.set_trigger(AlpTrigger.NONE)
 
         self.dmd = dmd
         self.dmd_fps = dmd_fps
@@ -176,10 +183,7 @@ class ShapingSystem:
 
     @property
     def output_shape(self):
-        if self.reducer is not None:
-            return self.reducer.reduced_shape(self.roi[2:])
-        else:
-            return self.roi[2:]
+        return self.reducer.reduced_shape(self.roi[2:])
 
     @property
     def output_size(self):
@@ -210,6 +214,7 @@ class ShapingSystem:
     def measure_tm(self, ref, shifts, progress = False):
         n = self.hologen.n
         dmd = self.dmd
+        dmd_fps = self.dmd_fps
         segments = self.segments
         n_frames = len(shifts)*segments
 
@@ -219,12 +224,13 @@ class ShapingSystem:
 
         if progress: print("Uploading patterns...")
 
-        seq = make_seq(dmd, hadamard, "binary_topdown", self.dmd_fps, 1)
+        seq = make_seq(dmd, hadamard, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
         
         if progress: print("Measuring...")
 
         self.cam.set_sync_out(True)
         self.cam.start_acquisition(n_frames)
+        dmd.set_trigger(AlpTrigger.FALLING)
         seq.start()
 
         while self.cam.is_acquiring():
@@ -235,8 +241,11 @@ class ShapingSystem:
 
         if progress: print("\nDone")
 
+        dmd.set_trigger(AlpTrigger.NONE)
+
         frames = self.cam.stop_acquisition()
         frames = self.reducer.reduce(frames)
+
         tm = np.empty((self.output_size, segments), dtype = "c16")
 
         for i in range(segments):
@@ -261,6 +270,8 @@ class ShapingSystem:
     #     shifts: Integer pixel shifts for phase stepping
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_field(self, zs, ref, shifts):
+        dmd = self.dmd
+        dmd_fps = self.dmd_fps
         n = self.hologen.n
 
         phases = np.array(shifts)*2*np.pi/n
@@ -270,14 +281,17 @@ class ShapingSystem:
         holo = self.hologen.gen_from_template(self.template, zs)
         holo = hologram.pack_bits(holo)
 
-        seq = make_seq(self.dmd, holo, "binary_topdown", self.dmd_fps, 1)
+        seq = make_seq(dmd, holo, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
 
         self.cam.set_sync_out(True)
         self.cam.start_acquisition(len(shifts))
+        dmd.set_trigger(AlpTrigger.FALLING)
         seq.start()
 
         while self.cam.is_acquiring():
             time.sleep(0.1)
+
+        dmd.set_trigger(AlpTrigger.NONE)
 
         frames = self.cam.stop_acquisition()
         frames = self.reducer.reduce(frames)
@@ -286,3 +300,29 @@ class ShapingSystem:
         seq.free()
 
         return field
+
+    def measure_intensity(self, zs, reduce = True):
+        dmd = self.dmd
+        dmd_fps = self.dmd_fps
+
+        holo = self.hologen.gen_from_template(self.template, zs)
+        holo = hologram.pack_bits(holo)[None, :, :]
+
+        seq = make_seq(dmd, holo, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
+
+        self.cam.set_sync_out(True)
+        self.cam.start_acquisition(1)
+        dmd.set_trigger(AlpTrigger.FALLING)
+        seq.start()
+
+        while self.cam.is_acquiring():
+            time.sleep(0.1)
+
+        dmd.set_trigger(AlpTrigger.NONE)
+        seq.free()
+
+        frames = self.cam.stop_acquisition()
+
+        if reduce: frames = self.reducer.reduce(frames)
+
+        return frames[0]
