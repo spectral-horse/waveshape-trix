@@ -2,56 +2,17 @@ from argparse import ArgumentParser, FileType
 
 parser = ArgumentParser()
 parser.add_argument("config", type = FileType("rb"))
+parser.add_argument("-o", "--output", type = FileType("wb"))
 
 args = parser.parse_args()
 
 print("Loading imports...")
 
-from shaping_system import ShapingSystem, BlockReducer, SkipReducer
-from dcam_backend import DcamBackend
-from alp4 import AlpError
+import shaping_system_config
 from PIL import Image
-import hologram
 import numpy as np
 import matplotlib.pyplot as plt
 from complex_color import imshow_complex
-from pydantic import BaseModel, NonNegativeInt, conlist
-from enum import Enum
-from typing import Optional
-import tomllib
-
-
-
-class DmdConfig(BaseModel):
-    segments: int
-
-class HologramType(str, Enum):
-    HASKELL = "haskell"
-    SUPERPIXEL = "superpixel"
-
-class HologramConfig(BaseModel):
-    type: HologramType
-    order: NonNegativeInt
-    shifts: list[NonNegativeInt]
-
-class ReducerType(str, Enum):
-    BLOCK = "block"
-    SKIP = "skip"
-
-class ReducerConfig(BaseModel):
-    type: ReducerType
-    dx: NonNegativeInt
-    dy: NonNegativeInt
-
-class CameraConfig(BaseModel):
-    roi: conlist(NonNegativeInt, min_length = 4, max_length = 4)
-    exposure: float
-    reducer: Optional[ReducerConfig] = None
-
-class Config(BaseModel):
-    dmd: DmdConfig
-    hologram: HologramConfig
-    camera: CameraConfig
 
 
 
@@ -64,45 +25,9 @@ def tikhonov_invert(mat, alpha):
 
 
 
-print("Loading config...")
+print("Loading config & setting up...")
 
-config_data = tomllib.load(args.config)
-config = Config.model_validate(config_data)
-shifts = config.hologram.shifts
-
-match config.hologram.type:
-    case "haskell": h = hologram.HaskellGenerator(config.hologram.order)
-    case "superpixel": h = hologram.SuperpixelGenerator(config.hologram.order)
-
-if config.camera.reducer is not None:
-    reducer_dx = config.camera.reducer.dx
-    reducer_dy = config.camera.reducer.dy
-
-    match config.camera.reducer.type:
-        case "block": reducer = BlockReducer(reducer_dx, reducer_dy)
-        case "skip": reducer = SkipReducer(reducer_dx, reducer_dy)
-else:
-    reducer = None
-
-print("Opening camera...")
-
-camera = DcamBackend(config.camera.roi, config.camera.exposure)
-
-print("Initialising system...")
-
-try:
-    system = ShapingSystem(
-        camera,
-        config.dmd.segments,   # Input DOFs on the DMD
-        1000,                  # DMD FPS (>> camera FPS)
-        h,                     # Hologram generator
-        reducer
-    )
-except AlpError as e:
-    print("Couldn't open DMD!")
-    print(*e.args)
-
-    exit(1)
+system = shaping_system_config.from_toml(args.config)
 
 print("Measuring reference intensity...")
 
@@ -111,8 +36,8 @@ colors = np.random.randint(0, 256, (system.segments, 3))
 
 zs1 = np.exp(2j*np.pi*np.random.uniform(0, 1, system.segments))
 zs2 = zs1*np.exp(2j*np.pi/system.hologen.n)
-speckle1 = system.measure_field(zs1, ref, shifts)
-speckle2 = system.measure_field(zs2, ref, shifts)
+speckle1 = system.measure_field(zs1, ref)
+speckle2 = system.measure_field(zs2, ref)
 
 plt.subplot(2, 2, 1)
 plt.title("DMD template")
@@ -128,19 +53,18 @@ plt.title("Random speckle shifted back")
 imshow_complex(speckle2*np.exp(-2j*np.pi/system.hologen.n))
 plt.show()
 
-tm = system.measure_tm(ref, shifts, progress = True)
+tm = system.measure_tm(ref, progress = True)
 
-target = np.zeros(system.output_shape)
-#target[8:12, 8:12] = 1
-#target[8, 8] = 1
+if args.output is not None:
+    np.save(args.output, tm)
+
 target = (np.array(Image.open("Targets/duck_20x20.png"))[:, :, 0] > 0)*1
 
-#test_zs = np.linalg.lstsq(tm, target.ravel())[0]
-test_zs = tikhonov_invert(tm, 2) @ target.ravel()
+test_zs = tikhonov_invert(tm, 10) @ target.ravel()
 test_zs /= np.abs(test_zs).max()
 test_zs = system.hologen.get_nearest(test_zs)
 
-test_out = system.measure_field(test_zs, ref, shifts)
+test_out = system.measure_field(test_zs, ref)
 
 plt.subplot(2, 3, 1)
 plt.title("Target output")
