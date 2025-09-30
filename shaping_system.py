@@ -156,7 +156,17 @@ class SkipReducer(Reducer):
         return (1,)*(len(img_shape)-2)+(height, width)
 
 class ShapingSystem:
-    def __init__(self, camera, segments, dmd_fps, hologen, reducer = None):
+    # Parameters are as follows.
+    #     camera: Instance of a CameraBackend controlling the camera
+    #     segments: Number of segments to divide the DMD surface into
+    #     dmd_fps: Framerate of the DMD (should be > camera FPS, to keep up)
+    #     hologen: Hologram generator
+    #     shifts: Integer pixel shifts for phase stepping
+    #     reducer: Instance of a Reducer to scale camera images down
+    def __init__(
+        self, camera, segments, dmd_fps, hologen, shifts,
+        reducer = None
+    ):
         if np.log2(segments)%1 != 0:
             raise ValueError("number of segments must be a power of 2")
 
@@ -175,6 +185,7 @@ class ShapingSystem:
         self.roi = camera.get_roi()
         self.template = hologram.make_template_grid(dmd_size[::-1], segments)
         self.hologen = hologen
+        self.shifts = np.array(shifts)
         self.reducer = reducer or NullReducer()
 
     @property
@@ -193,7 +204,8 @@ class ShapingSystem:
 
     # Measure the reference beam intensity with no pattern on the DMD.
     #     n_images - Number of shots to take
-    # Returns the mean intensity image over the specified number of shots.
+    # Returns the mean intensity image over the specified number of shots. This
+    # will NOT be reduced using the system's image reducer.
     def measure_reference(self, n_images):
         self.cam.set_sync_out(False)
         self.cam.start_acquisition(n_images)
@@ -202,20 +214,19 @@ class ShapingSystem:
             time.sleep(0.1)
 
         frames = self.cam.stop_acquisition()
-        frames = self.reducer.reduce(frames)
 
         return frames.mean(axis = 0)
 
     # Measure a transmission matrix.
-    #     ref: Reference intensity image
-    #     shifts: Integer pixel shifts for phase stepping
+    #     ref: Full-size (unreduced) reference intensity image
     #     progress: If True, print progress messages
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
-    def measure_tm(self, ref, shifts, progress = False):
+    def measure_tm(self, ref, progress = False):
         n = self.hologen.n
         dmd = self.dmd
         dmd_fps = self.dmd_fps
         segments = self.segments
+        shifts = self.shifts
         n_frames = len(shifts)*segments
 
         phase_mat = gen_phase_mat(shifts, n)
@@ -241,21 +252,20 @@ class ShapingSystem:
 
         if progress: print("\nDone")
 
+        dmd.halt()
         dmd.set_trigger(AlpTrigger.NONE)
+        seq.free()
 
         frames = self.cam.stop_acquisition()
-        frames = self.reducer.reduce(frames)
-
         tm = np.empty((self.output_size, segments), dtype = "c16")
 
         for i in range(segments):
             frame_start = i*len(shifts)
             frame_end = (i+1)*len(shifts)
             field = extract_z(frames[frame_start:frame_end], ref, phase_mat)
+            field = self.reducer.reduce(field)
 
             tm[:, i] = field.ravel()
-
-        seq.free()
 
         # Correct for the fact that shift indices are all offset by an extra
         # phase factor, then do the change of basis back from Hadamard
@@ -267,11 +277,12 @@ class ShapingSystem:
     # Measure a single complex-valued field in response to a single vector of
     # complex inputs.
     #     zs : 1D array of complex input values, one per group in the template
-    #     shifts: Integer pixel shifts for phase stepping
+    #     ref: Full-size (unreduced) reference intensity image
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
-    def measure_field(self, zs, ref, shifts):
+    def measure_field(self, zs, ref, reduce = True):
         dmd = self.dmd
         dmd_fps = self.dmd_fps
+        shifts = self.shifts
         n = self.hologen.n
 
         phases = np.array(shifts)*2*np.pi/n
@@ -291,13 +302,14 @@ class ShapingSystem:
         while self.cam.is_acquiring():
             time.sleep(0.1)
 
+        dmd.halt()
         dmd.set_trigger(AlpTrigger.NONE)
+        seq.free()
 
         frames = self.cam.stop_acquisition()
-        frames = self.reducer.reduce(frames)
         field = extract_z(frames, ref, phase_mat)
-
-        seq.free()
+        
+        if reduce: field = self.reducer.reduce(field)
 
         return field
 
@@ -318,6 +330,7 @@ class ShapingSystem:
         while self.cam.is_acquiring():
             time.sleep(0.1)
 
+        dmd.halt()
         dmd.set_trigger(AlpTrigger.NONE)
         seq.free()
 
