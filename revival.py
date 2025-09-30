@@ -1,10 +1,14 @@
-import gi
+from argparse import ArgumentParser, FileType
 
-gi.require_version("GLib", "2.0")
+parser = ArgumentParser()
+parser.add_argument("config", type = FileType("rb"))
 
-from gi.repository import GLib as glib
-from shaping_system import ShapingSystem
-from alp import AlpError
+args = parser.parse_args()
+
+print("Loading imports...")
+
+from alp4 import AlpDataFormat
+import shaping_system_config
 import hologram
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,29 +45,9 @@ def revival_field(tm1, tm2):
     return field
 
 
+print("Loading config & setting up...")
 
-h = hologram.SuperpixelGenerator(4)
-shifts = [0, 1, 2, 3] # phase shifts in pixels
-
-try:
-    system = ShapingSystem(
-        1024,             # Input DOFs on the DMD
-        h,                # Hologram generator
-        (0, 0, 128, 128), # Region of interest of the camera
-        (48, 48, 20, 20), # Sub-region of interest within camera ROI
-        100,              # Camera FPS
-        0.01              # Camera exposure in seconds
-    )
-except AlpError as e:
-    print("Couldn't open DMD!")
-    print(*e.args)
-
-    exit(1)
-except glib.Error as e:
-    print("Couldn't initialise camera!")
-    print(e.message)
-
-    exit(1)
+system = shaping_system_config.from_toml(args.config)
 
 ref = system.measure_reference(200)
 colors = np.random.randint(0, 256, (system.segments, 3))
@@ -73,17 +57,17 @@ plt.title("DMD template")
 plt.imshow(colors[system.template])
 plt.subplot(1, 2, 2)
 plt.title("Reference intensity")
-plt.imshow(ref, cmap = "gray", vmin = 0, vmax = 255)
+plt.imshow(ref, cmap = "gray", vmin = 0)
 plt.show()
 
-tm1 = system.measure_tm(ref, shifts, progress = True)
+tm1 = system.measure_tm(ref, progress = True)
 
 np.save("revival_tm1.npy", tm1)
 
 print("Measured 1st TM")
 input("Enter anything to measure 2nd TM... ")
 
-tm2 = system.measure_tm(ref, shifts, progress = True)
+tm2 = system.measure_tm(ref, progress = True)
 
 np.save("revival_tm2.npy", tm2)
 
@@ -121,11 +105,11 @@ holo = hologram.pack_bits(holo)
 print("Uploading...")
 
 seq = system.dmd.allocate_sequence(1, 1)
-seq.set_format("binary_topdown")
+seq.set_format(AlpDataFormat.BINARY_TOPDOWN)
 seq.put(0, 1, holo)
 seq.start(continuous = True)
 
-del system.cam
+system.cam.close()
 
 print("Hologram is now displaying")
 input("Enter anything to stop... ")
