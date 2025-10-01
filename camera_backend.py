@@ -43,3 +43,8 @@ class CameraBackend(ABC):
         # Get an arbitrary identification string for this camera. This can be
         # absolutely anything, but ideally a model name and/or serial number.
         pass
+
+    @abstractmethod
+    def close(self):
+        # Free all resources and connections to the camera
+        pass
