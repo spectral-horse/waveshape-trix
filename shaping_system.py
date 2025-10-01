@@ -188,6 +188,10 @@ class ShapingSystem:
         self.shifts = np.array(shifts)
         self.reducer = reducer or NullReducer()
 
+        # Will be an AlpSequence handle to a Hadamard pattern sequence when a
+        # TM has just been taken, to allow for re-use of this large sequence.
+        self.hadamard_seq = None
+
     @property
     def segments(self):
         return int(self.template.max()+1)
@@ -229,20 +233,22 @@ class ShapingSystem:
         shifts = self.shifts
         n_frames = len(shifts)*segments
 
-        phase_mat = gen_phase_mat(shifts, n)
-        hadamard = self.hologen.hadamard_template(self.template, shifts)
-        hadamard = hologram.pack_bits(hadamard)
+        if self.hadamard_seq is None:
+            hadamard = self.hologen.hadamard_template(self.template, shifts)
+            hadamard = np.packbits(hadamard, axis = -1)
 
-        if progress: print("Uploading patterns...")
+            if progress: print("Uploading patterns...")
 
-        seq = make_seq(dmd, hadamard, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
+            self.hadamard_seq = make_seq(
+                dmd, hadamard, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1
+            )
         
         if progress: print("Measuring...")
 
         self.cam.set_sync_out(True)
         self.cam.start_acquisition(n_frames)
         dmd.set_trigger(AlpTrigger.FALLING)
-        seq.start()
+        self.hadamard_seq.start()
 
         while self.cam.is_acquiring():
             time.sleep(0.1)
@@ -254,10 +260,10 @@ class ShapingSystem:
 
         dmd.halt()
         dmd.set_trigger(AlpTrigger.NONE)
-        seq.free()
 
         frames = self.cam.stop_acquisition()
         tm = np.empty((self.output_size, segments), dtype = "c16")
+        phase_mat = gen_phase_mat(shifts, n)
 
         for i in range(segments):
             frame_start = i*len(shifts)
@@ -280,6 +286,10 @@ class ShapingSystem:
     #     ref: Full-size (unreduced) reference intensity image
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_field(self, zs, ref, reduce = True):
+        if self.hadamard_seq is not None:
+            self.hadamard_seq.free()
+            self.hadamard_seq = None
+
         dmd = self.dmd
         dmd_fps = self.dmd_fps
         shifts = self.shifts
@@ -314,6 +324,10 @@ class ShapingSystem:
         return field
 
     def measure_intensity(self, zs, reduce = True):
+        if self.hadamard_seq is not None:
+            self.hadamard_seq.free()
+            self.hadamard_seq = None
+
         dmd = self.dmd
         dmd_fps = self.dmd_fps
 
