@@ -89,6 +89,9 @@ class DcamBackend(CameraBackend):
         else:
             self.dev.set_output_trigger_kind(0, DcamOutputKind.LOW)
 
+    def get_framerate(self):
+        return self.dev.get_property("INTERNAL FRAME RATE").value
+
     def get_roi(self):
         return self.roi
 

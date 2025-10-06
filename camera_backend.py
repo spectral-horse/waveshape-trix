@@ -32,6 +32,12 @@ class CameraBackend(ABC):
         pass
 
     @abstractmethod
+    def get_framerate(self) -> float:
+        # Get the framerate that the camera will run at if start_acquisition is
+        # called right now.
+        pass
+
+    @abstractmethod
     def get_roi(self) -> (int, int, int, int):
         # Get the region of interest of the camera as a tuple of the form
         # (x, y, width, height). The width and height must match the width and
