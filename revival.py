@@ -8,6 +8,7 @@ args = parser.parse_args()
 print("Loading imports...")
 
 from alp4 import AlpDataFormat
+from complex_color import imshow_complex
 import shaping_system_config
 import hologram
 import numpy as np
@@ -22,27 +23,35 @@ def tikhonov_invert(mat, alpha):
 
     return vh.conj().T @ s_inv @ u.conj().T
 
-def revival_field(tm1, tm2):
+def revival_field(tm1, tm2, method = "field_distance"):
     if tm1.shape != tm2.shape:
         raise ValueError("TMs must be the same shape")
 
-    free_dofs = tm1.shape[1]-tm1.shape[0]
-    dist_mat = (tm2-tm1).conj().T @ (tm2-tm1)
-    power_mat = tm1.conj().T @ tm1
+    match method:
+        case "field_distance":
+            free_dofs = tm1.shape[1]-tm1.shape[0]
+            dist_mat = (tm2-tm1).conj().T @ (tm2-tm1)
+            power_mat = tm1.conj().T @ tm1
 
-    eigvals, eigvecs = np.linalg.eig(dist_mat)
-    idcs = np.argsort(np.abs(eigvals))
-    null_mat = eigvecs[:, idcs[:free_dofs]]
-    mat = null_mat @ np.linalg.pinv(null_mat) @ power_mat
-    eigvals, eigvecs = np.linalg.eig(mat)
+            eigvals, eigvecs = np.linalg.eig(dist_mat)
+            idcs = np.argsort(np.abs(eigvals))
+            null_mat = eigvecs[:, idcs[:free_dofs]]
+            mat = null_mat @ np.linalg.pinv(null_mat) @ power_mat
+            eigvals, eigvecs = np.linalg.eig(mat)
 
-    field = eigvecs[:, np.argmax(np.abs(eigvals))]
-    field /= np.abs(field).max()
+            field = eigvecs[:, np.argmax(np.abs(eigvals))]
+            field /= np.abs(field).max()
 
-    print("POWER:", (field.conj() @ (power_mat @ field))/(field.conj() @ field))
-    print("DIST:", (field.conj() @ (dist_mat @ field))/(field.conj() @ field))
+            print("POWER:", (field.conj() @ (power_mat @ field))/(field.conj() @ field))
+            print("DIST:", (field.conj() @ (dist_mat @ field))/(field.conj() @ field))
 
-    return field
+            return field
+        case "devival":
+            eigvals, eigvecs = np.linalg.eigh(tm2.conj().T @ tm1)
+            field = eigvecs[:, 0]
+            field /= np.abs(field).max()
+
+            return field
 
 
 print("Loading config & setting up...")
@@ -74,28 +83,27 @@ np.save("revival_tm2.npy", tm2)
 print("Measured 2nd TM")
 print("Computing revival input field...")
 
-#field_in = revival_field(tm1, tm2)
+field_in = revival_field(tm1, tm2, method = "devival")
 
-# Maximum sensitivity recipe
-#mat = tm2.conj().T @ tm1
-#eigvals, eigvecs = np.linalg.eig(mat)
-#idcs = np.argsort(np.abs(eigvals))
-#free_dofs = tm1.shape[1]-tm1.shape[0]
-#eigvecs = eigvecs[:, idcs[:free_dofs]]
-#eigvecs /= np.abs(eigvecs).max(axis = 0)
-#powers = (np.abs(tm1 @ eigvecs)**2).sum(axis = 0)
-#field_in = eigvecs[:, np.argmax(powers)]
+imshow_complex(field_in[system.template])
+plt.show()
 
-#plt.plot(np.sort(np.abs(eigvals)))
-#plt.plot([0, free_dofs], [0, 0])
-#plt.show()
+input("Enter anything to capture response (1/2)...")
 
-# Popoff-Wigner-Smith operator
-mat = tikhonov_invert(tm1, 1) @ (tm2-tm1)
-mat += mat.conj().T
-eigvals, eigvecs = np.linalg.eig(mat)
-field_in = eigvecs[:, np.argmin(np.abs(eigvals))]
-field_in /= np.abs(field_in).max()
+out1 = system.measure_field(field_in, ref)
+
+input("Enter anything to capture response (2/2)...")
+
+out2 = system.measure_field(field_in, ref)
+cor = np.corrcoef([out1.ravel(), out2.ravel()])[0, 1]
+
+print("Correlation:", np.abs(cor))
+
+plt.subplot(1, 2, 1)
+imshow_complex(out1)
+plt.subplot(1, 2, 2)
+imshow_complex(out2)
+plt.show()
 
 print("Generating hologram...")
 
