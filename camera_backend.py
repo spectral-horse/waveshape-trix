@@ -25,10 +25,20 @@ class CameraBackend(ABC):
         pass
 
     @abstractmethod
+    def set_exposure(self, exposure: float):
+        # Set the exposure of the camera in seconds
+        pass
+
+    @abstractmethod
     def set_sync_out(self, enabled: bool):
         # Enable or disable the sync out signal of the camera, which should be
         # a signal that goes LOW when exposure of a frame completes. Therefore
         # the FALLING edge of this signal will mark the end of each frame.
+        pass
+
+    @abstractmethod
+    def get_exposure(self) -> float:
+        # Get the exposure of the camera in seconds
         pass
 
     @abstractmethod

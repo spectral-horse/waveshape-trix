@@ -79,6 +79,9 @@ class DcamBackend(CameraBackend):
     def is_acquiring(self):
         return self.dev.get_capturing()
 
+    def set_exposure(self, exposure):
+        self.dev.set_property("EXPOSURE TIME", exposure)
+
     def set_sync_out(self, enabled):
         if enabled:
             self.dev.set_output_trigger_period(0, 0.001)
@@ -88,6 +91,9 @@ class DcamBackend(CameraBackend):
             self.dev.set_output_trigger_kind(0, DcamOutputKind.PROGRAMMABLE)
         else:
             self.dev.set_output_trigger_kind(0, DcamOutputKind.LOW)
+
+    def get_exposure(self):
+        return self.dev.get_property("EXPOSURE TIME").value
 
     def get_framerate(self):
         return self.dev.get_property("INTERNAL FRAME RATE").value
