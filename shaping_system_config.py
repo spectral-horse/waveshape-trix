@@ -1,9 +1,11 @@
 from dcam_backend import DcamBackend
-from shaping_system import ShapingSystem, BlockReducer, SkipReducer
+from shaping_system import ShapingSystem
 from alp4 import AlpError
 from pydantic import BaseModel, NonNegativeInt, conlist
 from enum import Enum
 from typing import Optional
+from PIL import Image
+import numpy as np
 import tomllib
 import hologram
 
@@ -25,15 +27,10 @@ class ReducerType(str, Enum):
     BLOCK = "block"
     SKIP = "skip"
 
-class ReducerConfig(BaseModel):
-    type: ReducerType
-    dx: NonNegativeInt
-    dy: NonNegativeInt
-
 class CameraConfig(BaseModel):
     roi: conlist(NonNegativeInt, min_length = 4, max_length = 4)
     exposure: float
-    reducer: Optional[ReducerConfig] = None
+    mask: Optional[str] = None
 
 class Config(BaseModel):
     dmd: DmdConfig
@@ -50,15 +47,15 @@ def from_toml(path):
         case "haskell": h = hologram.HaskellGenerator(config.hologram.order)
         case "superpixel": h = hologram.SuperpixelGenerator(config.hologram.order)
 
-    if config.camera.reducer is not None:
-        reducer_dx = config.camera.reducer.dx
-        reducer_dy = config.camera.reducer.dy
-
-        match config.camera.reducer.type:
-            case "block": reducer = BlockReducer(reducer_dx, reducer_dy)
-            case "skip": reducer = SkipReducer(reducer_dx, reducer_dy)
+    if config.camera.mask is not None:
+        mask = np.array(Image.open(config.camera.mask))
+        
+        match mask.ndim:
+            case 2: mask = mask.astype(bool)
+            case 3: mask = mask[:, :, :3].mean(axis = 2).astype(bool)
+            case _: raise ValueError("mask image must be 2D")
     else:
-        reducer = None
+        mask = None
 
     print("Opening camera...")
 
@@ -73,7 +70,7 @@ def from_toml(path):
             1000,                   # DMD FPS (>> camera FPS)
             h,                      # Hologram generator
             config.hologram.shifts, # Phase stepping shifts
-            reducer
+            mask
         )
     except AlpError as e:
         print("Couldn't open DMD!")

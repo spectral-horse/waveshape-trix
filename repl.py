@@ -148,7 +148,10 @@ def cmd_list(state, args):
     print(len(state.outputs), "output field(s):")
 
     for i, output in enumerate(state.outputs):
-        print("  {}: {}x{}".format(i, *output.shape[::-1]))
+        if len(output.shape) == 2:
+            print("  {}: {}x{}".format(i, *output.shape[::-1]))
+        elif len(output.shape) == 1:
+            print("  {}: {}".format(i, *output.shape))
 
 def cmd_show(state, args):
     if len(args) == 0:

@@ -1,8 +1,4 @@
 from alp4 import Alp, AlpDataFormat, AlpTrigger
-from collections import deque
-from skimage.measure import block_reduce
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import hologram
 import numpy as np
 import time
@@ -103,75 +99,20 @@ def spinner(width, dt):
 
 
 
-class Reducer(ABC):
-    @abstractmethod
-    def reduce(img: np.ndarray) -> np.ndarray:
-        pass
-
-    @abstractmethod
-    def reduced_shape(img_shape: (int, int)) -> (int, int):
-        pass
-
-class NullReducer(Reducer):
-    def reduce(self, img):
-        return img
-
-    def reduced_shape(self, img_shape):
-        return img_shape
-
-@dataclass
-class BlockReducer(Reducer):
-    def __init__(self, nx, ny):
-        self.shape = (ny, nx)
-
-    def reduce(self, img):
-        shape = (1,)*(img.ndim-2)+self.shape
-        reduced = block_reduce(img, block_size = shape, func = np.mean)
-        height = img.shape[-2]//self.shape[0]
-        width = img.shape[-1]//self.shape[1]
-
-        # Necessary to slice this because `block_reduce` will include partial
-        # blocks at the edges and we want only full blocks
-        return reduced[..., :height, :width]
-
-    def reduced_shape(self, img_shape):
-        shape_2d = (img_shape[0]//self.shape[0], img_shape[1]//self.shape[1])
-
-        return (1,)*(len(img_shape)-2)+shape_2d
-
-@dataclass
-class SkipReducer(Reducer):
-    def __init__(self, nx, ny):
-        self.nx = nx
-        self.ny = ny
-
-    def reduce(self, img):
-        if img.ndim == 2: return img[::self.ny, ::self.nx]
-        else: return img[:, ::self.ny, ::self.nx]
-
-    def reduced_shape(self, img_shape):
-        height = (img_shape[0]+self.ny-1)//self.ny
-        width = (img_shape[1]+self.nx-1)//self.nx
-
-        return (1,)*(len(img_shape)-2)+(height, width)
-
 class ShapingSystem:
     # Parameters are as follows.
-    #     camera: Instance of a CameraBackend controlling the camera
+    #     camera:   Instance of a CameraBackend controlling the camera
     #     segments: Number of segments to divide the DMD surface into
-    #     dmd_fps: Framerate of the DMD (should be > camera FPS, to keep up)
-    #     hologen: Hologram generator
-    #     shifts: Integer pixel shifts for phase stepping
-    #     reducer: Instance of a Reducer to scale camera images down
+    #     dmd_fps:  Framerate of the DMD (should be > camera FPS, to keep up)
+    #     hologen:  Hologram generator
+    #     shifts:   Integer pixel shifts for phase stepping
+    #     mask:     Optional 2D boolean array to select output pixels
     def __init__(
         self, camera, segments, dmd_fps, hologen, shifts,
-        reducer = None
+        mask = None
     ):
         if np.log2(segments)%1 != 0:
             raise ValueError("number of segments must be a power of 2")
-
-        if reducer is not None and not isinstance(reducer, Reducer):
-            raise TypeError("reducer must be a Reducer")
 
         alp = Alp()
         dmd = alp.open_device()
@@ -186,7 +127,8 @@ class ShapingSystem:
         self.template = hologram.make_template_grid(dmd_size[::-1], segments)
         self.hologen = hologen
         self.shifts = np.array(shifts)
-        self.reducer = reducer or NullReducer()
+        self.mask = mask
+        self.mask_sum = mask.sum()
 
         # Will be an AlpSequence handle to a Hadamard pattern sequence when a
         # TM has just been taken, to allow for re-use of this large sequence.
@@ -198,18 +140,22 @@ class ShapingSystem:
 
     @property
     def output_shape(self):
-        return self.reducer.reduced_shape(self.roi[2:])
+        if self.mask is None: return self.roi[2:]
+        else: return (self.mask_sum,)
 
     @property
     def output_size(self):
-        h, w = self.output_shape
+        if self.mask is None: return self.roi[2]*self.roi[3]
+        else: return self.mask_sum
 
-        return w*h
+    def _apply_mask(self, imgs):
+        if self.mask is None: return imgs
+        else: return imgs[..., self.mask]
 
     # Measure the reference beam intensity with no pattern on the DMD.
     #     n_images - Number of shots to take
     # Returns the mean intensity image over the specified number of shots. This
-    # will NOT be reduced using the system's image reducer.
+    # will NOT be reduced using the system's mask.
     def measure_reference(self, n_images):
         self.cam.set_sync_out(False)
         self.cam.start_acquisition(n_images)
@@ -222,7 +168,7 @@ class ShapingSystem:
         return frames.mean(axis = 0)
 
     # Measure a transmission matrix.
-    #     ref: Full-size (unreduced) reference intensity image
+    #     ref: Full-size (unreduced/unmasked) reference intensity image
     #     progress: If True, print progress messages
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_tm(self, ref, progress = False):
@@ -269,7 +215,7 @@ class ShapingSystem:
             frame_start = i*len(shifts)
             frame_end = (i+1)*len(shifts)
             field = extract_z(frames[frame_start:frame_end], ref, phase_mat)
-            field = self.reducer.reduce(field)
+            field = self._apply_mask(field)
 
             tm[:, i] = field.ravel()
 
@@ -282,8 +228,9 @@ class ShapingSystem:
 
     # Measure a single complex-valued field in response to a single vector of
     # complex inputs.
-    #     zs : 1D array of complex input values, one per group in the template
-    #     ref: Full-size (unreduced) reference intensity image
+    #     zs :    1D array of complex input values, one per template group
+    #     ref:    Full-size (unreduced/unmasked) reference intensity image
+    #     reduce: Whether to reduce the output with the system's mask
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_field(self, zs, ref, reduce = True):
         if self.hadamard_seq is not None:
@@ -318,8 +265,8 @@ class ShapingSystem:
 
         frames = self.cam.stop_acquisition()
         field = extract_z(frames, ref, phase_mat)
-        
-        if reduce: field = self.reducer.reduce(field)
+
+        if reduce: field = self._apply_mask(field)
 
         return field
 
@@ -350,6 +297,6 @@ class ShapingSystem:
 
         frames = self.cam.stop_acquisition()
 
-        if reduce: frames = self.reducer.reduce(frames)
+        if reduce: frames = self._apply_mask(frames)
 
         return frames[0]
