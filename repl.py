@@ -1,7 +1,7 @@
-from argparse import ArgumentParser, FileType
+from argparse import ArgumentParser
 
 parser = ArgumentParser()
-parser.add_argument("config", type = FileType("rb"))
+parser.add_argument("config")
 
 args = parser.parse_args()
 

@@ -8,6 +8,7 @@ from PIL import Image
 import numpy as np
 import tomllib
 import hologram
+import os
 
 
 
@@ -40,7 +41,7 @@ class Config(BaseModel):
 
 
 def from_toml(path):
-    config_data = tomllib.load(path)
+    config_data = tomllib.load(open(path, "rb"))
     config = Config.model_validate(config_data)
 
     match config.hologram.type:
@@ -48,7 +49,8 @@ def from_toml(path):
         case "superpixel": h = hologram.SuperpixelGenerator(config.hologram.order)
 
     if config.camera.mask is not None:
-        mask = np.array(Image.open(config.camera.mask))
+        mask_path = os.path.join(os.path.dirname(path), config.camera.mask)
+        mask = np.array(Image.open(mask_path))
         
         match mask.ndim:
             case 2: mask = mask.astype(bool)
