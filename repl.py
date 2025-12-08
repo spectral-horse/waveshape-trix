@@ -132,7 +132,7 @@ def cmd_matrix(state, args):
     state.tms.append(MatrixRecord(tm, time))
 
 def cmd_list(state, args):
-    print(len(state.tms), "transmission matrice(s)")
+    print(len(state.tms), "transmission matrice(s):")
 
     for i, record in enumerate(state.tms):
         time_str = record.time.strftime("%H:%M:%S")
@@ -152,6 +152,22 @@ def cmd_list(state, args):
             print("  {}: {}x{}".format(i, *output.shape[::-1]))
         elif len(output.shape) == 1:
             print("  {}: {}".format(i, *output.shape))
+
+def cmd_clear(state, args):
+    if len(args) != 1:
+        print("Usage: clear matrices/inputs/outputs/all")
+    elif args[0] in ["matrices", "mat"]:
+        state.tms.clear()
+    elif args[0] in ["inputs", "in"]:
+        state.inputs.clear()
+    elif args[0] in ["outputs", "out"]:
+        state.outputs.clear()
+    elif args[0] in ["all", "a"]:
+        state.tms.clear()
+        state.inputs.clear()
+        state.outputs.clear()
+    else:
+        print("Invalid list to clear")
 
 def cmd_show(state, args):
     if len(args) == 0:
@@ -383,6 +399,7 @@ cmds = [
     (["reference", "ref"], cmd_reference),
     (["matrix", "mat"], cmd_matrix),
     (["list", "ls", "l"], cmd_list),
+    (["clear", "c"], cmd_clear),
     (["show", "s"], cmd_show),
     (["revival", "rev"], cmd_revival),
     (["video", "v"], cmd_video),
