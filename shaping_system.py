@@ -114,6 +114,9 @@ class ShapingSystem:
         if np.log2(segments)%1 != 0:
             raise ValueError("number of segments must be a power of 2")
 
+        if mask is not None and mask.dtype != bool:
+            raise ValueError("mask must be a 2D boolean array")
+
         alp = Alp()
         dmd = alp.open_device()
         dmd_size = dmd.get_display_size()
@@ -247,7 +250,7 @@ class ShapingSystem:
 
         zs = np.exp(1j*phases)[:, None]*zs
         holo = self.hologen.gen_from_template(self.template, zs)
-        holo = hologram.pack_bits(holo)
+        holo = np.packbits(holo, axis = -1)
 
         seq = make_seq(dmd, holo, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
 
@@ -262,6 +265,8 @@ class ShapingSystem:
         dmd.halt()
         dmd.set_trigger(AlpTrigger.NONE)
         seq.free()
+
+        self.cam.set_sync_out(False)
 
         frames = self.cam.stop_acquisition()
         field = extract_z(frames, ref, phase_mat)
@@ -279,7 +284,7 @@ class ShapingSystem:
         dmd_fps = self.dmd_fps
 
         holo = self.hologen.gen_from_template(self.template, zs)
-        holo = hologram.pack_bits(holo)[None, :, :]
+        holo = np.packbits(holo, axis = -1)[None, :, :]
 
         seq = make_seq(dmd, holo, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
 
