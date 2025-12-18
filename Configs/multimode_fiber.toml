@@ -7,6 +7,6 @@ order = 4
 shifts = [0, 1, 2, 3]
 
 [camera]
-roi = [0, 364, 720, 720]
+roi = [272, 1040, 720, 720]
 exposure = 0.001
 mask = "mmf_mask.png"
