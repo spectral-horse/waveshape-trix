@@ -300,12 +300,26 @@ def cmd_exposure(state, args):
         print("Usage: exposure [EXPOSURE_SECONDS]")
 
 def cmd_generate(state, args):
-    n = state.system.segments
-    zs = np.random.normal(0, 1, n)*1j
-    zs += np.random.normal(0, 1, n)
-    zs /= np.abs(zs).max()
+    if len(args) != 1:
+        print("Usage: generate TYPE")
+        return
 
-    state.inputs.append(InputFieldRecord(zs, "Generated"))
+    n = state.system.segments
+
+    if args[0] in ["gaussian", "gauss", "g"]:
+        zs = np.random.normal(0, 1, n)*1j
+        zs += np.random.normal(0, 1, n)
+        zs /= np.abs(zs).max()
+
+        name = "Generated (gaussian)"
+
+        state.inputs.append(InputFieldRecord(zs, name))
+    elif args[0] in ["ones", "one", "1"]:
+        name = "Generated (ones)"
+
+        state.inputs.append(InputFieldRecord(np.ones(n), name))
+    else:
+        print("Valid types are gaussian and ones")
 
 def cmd_apply(state, args):
     if len(args) != 1:
@@ -341,8 +355,8 @@ def cmd_measure(state, args):
         print("Must have a reference image first")
         return
 
-    if len(args) != 2:
-        print("Usage: measure N REDUCE?")
+    if len(args) != 3:
+        print("Usage: measure N INTENSITY? REDUCE?")
         return
 
     try:
@@ -354,16 +368,25 @@ def cmd_measure(state, args):
         print("Input field index out of bounds")
         return
 
-    match args[1]:
+    match args[2]:
         case "yes": reduce = True
         case "no": reduce = False
         case _:
             print("REDUCE? must be 'yes' or 'no'")
             return
 
-    output_field = state.system.measure_field(
-        input_field, state.ref_img, reduce = reduce
-    )
+    match args[1]:
+        case "yes":
+            output_field = state.system.measure_intensity(
+                input_field, reduce = reduce
+            )
+        case "no":
+            output_field = state.system.measure_field(
+                input_field, state.ref_img, reduce = reduce
+            )
+        case _:
+            print("INTENSITY? must be 'yes' or 'no'")
+            return
 
     state.outputs.append(output_field)
 
