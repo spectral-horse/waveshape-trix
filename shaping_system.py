@@ -1,4 +1,3 @@
-from alp4 import Alp, AlpDataFormat, AlpTrigger
 import hologram
 import numpy as np
 import time
@@ -7,31 +6,12 @@ import time
 
 # Generating the inverse matrix relating a vector of intensity measurements
 # to its solution vector [A^2+B^2, 2AB cos(phi), 2AB sin(phi)]
-def gen_phase_mat(shifts, n):
-    phases = np.array(shifts)*2*np.pi/n
+def gen_phase_mat(shifts):
     phase_mat = np.linalg.pinv(np.c_[
-        np.ones(len(shifts)), np.cos(phases), -np.sin(phases)
+        np.ones(len(shifts)), np.cos(shifts), -np.sin(shifts)
     ])
 
     return phase_mat
-
-# Create a DMD sequence and initialise it for projection with the given data.
-#     dmd : An open instance of alp.AlpDevice
-#     data : Array of byte images to upload to the DMD, with shape (n, h, w)
-#     data_fmt : Binary format of the data (as supported in alp module)
-#     rate : Display rate in images per second
-#     cycle_limit : Stop after this many cycles if given, otherwise continuous
-# Returns the alp.AlpSequence object, ready to be run.
-def make_seq(dmd, data, data_fmt, rate, cycle_limit = None):
-    seq = dmd.allocate_sequence(1, data.shape[0])
-    seq.set_format(data_fmt)
-    seq.put(0, data.shape[0], data)
-    seq.set_timing(picture = int(0.5+1_000_000/rate))
-
-    if cycle_limit is not None:
-        seq.set_cycles(cycle_limit)
-
-    return seq
 
 # Convert an Aravis buffer to an ndarray, optionally cropping it.
 #     buf : An instance of Aravis.Buffer containing image data
@@ -100,46 +80,26 @@ def spinner(width, dt):
 
 
 class ShapingSystem:
-    # Parameters are as follows.
-    #     camera:   Instance of a CameraBackend controlling the camera
-    #     segments: Number of segments to divide the DMD surface into
-    #     dmd_fps:  Framerate of the DMD (should be > camera FPS, to keep up)
-    #     hologen:  Hologram generator
-    #     shifts:   Integer pixel shifts for phase stepping
-    #     mask:     Optional 2D boolean array to select output pixels
-    def __init__(
-        self, camera, segments, dmd_fps, hologen, shifts,
-        mask = None
-    ):
-        if np.log2(segments)%1 != 0:
-            raise ValueError("number of segments must be a power of 2")
-
+    # Parameters are as follows:
+    #     camera: Instance of a CameraBackend controlling the camera
+    #     shaper: Instance of a ShaperBackend controlling some SLM/DMD/etc
+    #     shifts: Phase shifts for interferometric stepping
+    #     mask:   Optional 2D boolean array to select output pixels
+    def __init__(self, camera, shaper, shifts, mask = None):
         if mask is not None and mask.dtype != bool:
             raise ValueError("mask must be a 2D boolean array")
 
-        alp = Alp()
-        dmd = alp.open_device()
-        dmd_size = dmd.get_display_size()
-
-        dmd.set_trigger(AlpTrigger.NONE)
-
-        self.dmd = dmd
-        self.dmd_fps = dmd_fps
+        self.shaper = shaper
         self.cam = camera
         self.roi = camera.get_roi()
-        self.template = hologram.make_template_grid(dmd_size[::-1], segments)
-        self.hologen = hologen
         self.shifts = np.array(shifts)
         self.mask = mask
         self.mask_sum = mask.sum()
-
-        # Will be an AlpSequence handle to a Hadamard pattern sequence when a
-        # TM has just been taken, to allow for re-use of this large sequence.
-        self.hadamard_seq = None
+        self.just_measured_tm = False
 
     @property
-    def segments(self):
-        return int(self.template.max()+1)
+    def input_size(self):
+        return self.shaper.dofs()
 
     @property
     def output_shape(self):
@@ -175,29 +135,25 @@ class ShapingSystem:
     #     progress: If True, print progress messages
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_tm(self, ref, progress = False):
-        n = self.hologen.n
-        dmd = self.dmd
-        dmd_fps = self.dmd_fps
-        segments = self.segments
-        shifts = self.shifts
-        n_frames = len(shifts)*segments
+        if not self.just_measured_tm:
+            self.shaper.free_patterns()
 
-        if self.hadamard_seq is None:
-            hadamard = self.hologen.hadamard_template(self.template, shifts)
-            hadamard = np.packbits(hadamard, axis = -1)
+            mat = hadamard_mat(self.input_size)
+            zs = mat[:, None, :]*np.exp(1j*self.shifts)[:, None]
+            zs.shape = (-1, mat.shape[1])
 
-            if progress: print("Uploading patterns...")
+            if progress: print("Uploading probe patterns...")
 
-            self.hadamard_seq = make_seq(
-                dmd, hadamard, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1
-            )
-        
+            self.shaper.upload_patterns(zs)
+
         if progress: print("Measuring...")
+
+        n_frames = len(self.shifts)*self.input_size
 
         self.cam.set_sync_out(True)
         self.cam.start_acquisition(n_frames)
-        dmd.set_trigger(AlpTrigger.FALLING)
-        self.hadamard_seq.start()
+        self.shaper.set_sync_in(True)
+        self.shaper.start()
 
         while self.cam.is_acquiring():
             time.sleep(0.1)
@@ -207,16 +163,16 @@ class ShapingSystem:
 
         if progress: print("\nDone")
 
-        dmd.halt()
-        dmd.set_trigger(AlpTrigger.NONE)
+        self.shaper.stop()
+        self.shaper.set_sync_in(False)
 
         frames = self.cam.stop_acquisition()
-        tm = np.empty((self.output_size, segments), dtype = "c16")
-        phase_mat = gen_phase_mat(shifts, n)
+        tm = np.empty((self.output_size, self.input_size), dtype = "c16")
+        phase_mat = gen_phase_mat(self.shifts)
 
-        for i in range(segments):
-            frame_start = i*len(shifts)
-            frame_end = (i+1)*len(shifts)
+        for i in range(self.input_size):
+            frame_start = i*len(self.shifts)
+            frame_end = (i+1)*len(self.shifts)
             field = extract_z(frames[frame_start:frame_end], ref, phase_mat)
             field = self._apply_mask(field)
 
@@ -224,8 +180,9 @@ class ShapingSystem:
 
         # Correct for the fact that shift indices are all offset by an extra
         # phase factor, then do the change of basis back from Hadamard
-        tm *= np.exp(-1j*np.pi*(np.floor(n*n/2)-1)/(n*n))
-        tm = tm @ np.linalg.inv(hadamard_mat(segments))
+        #tm *= np.exp(-1j*np.pi*(np.floor(n*n/2)-1)/(n*n))
+
+        tm = tm @ np.linalg.inv(hadamard_mat(self.input_size))
 
         return tm
 
@@ -236,39 +193,25 @@ class ShapingSystem:
     #     reduce: Whether to reduce the output with the system's mask
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_field(self, zs, ref, reduce = True):
-        if self.hadamard_seq is not None:
-            self.hadamard_seq.free()
-            self.hadamard_seq = None
+        if self.just_measured_tm:
+            self.shaper.free_patterns()
 
-        dmd = self.dmd
-        dmd_fps = self.dmd_fps
-        shifts = self.shifts
-        n = self.hologen.n
+        zs = np.exp(1j*self.shifts)[:, None]*zs
 
-        phases = np.array(shifts)*2*np.pi/n
-        phase_mat = gen_phase_mat(shifts, n)
-
-        zs = np.exp(1j*phases)[:, None]*zs
-        holo = self.hologen.gen_from_template(self.template, zs)
-        holo = np.packbits(holo, axis = -1)
-
-        seq = make_seq(dmd, holo, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
-
+        self.shaper.upload_patterns(zs)
         self.cam.set_sync_out(True)
-        self.cam.start_acquisition(len(shifts))
-        dmd.set_trigger(AlpTrigger.FALLING)
-        seq.start()
+        self.cam.start_acquisition(len(self.shifts))
+        self.shaper.set_sync_in(True)
+        self.shaper.start()
 
         while self.cam.is_acquiring():
             time.sleep(0.1)
 
-        dmd.halt()
-        dmd.set_trigger(AlpTrigger.NONE)
-        seq.free()
-
-        self.cam.set_sync_out(False)
+        self.shaper.free_patterns()
+        self.shaper.set_sync_in(False)
 
         frames = self.cam.stop_acquisition()
+        phase_mat = gen_phase_mat(self.shifts)
         field = extract_z(frames, ref, phase_mat)
 
         if reduce: field = self._apply_mask(field)
@@ -276,29 +219,20 @@ class ShapingSystem:
         return field
 
     def measure_intensity(self, zs, reduce = True):
-        if self.hadamard_seq is not None:
-            self.hadamard_seq.free()
-            self.hadamard_seq = None
+        if self.just_measured_tm:
+            self.shaper.free_patterns()
 
-        dmd = self.dmd
-        dmd_fps = self.dmd_fps
-
-        holo = self.hologen.gen_from_template(self.template, zs)
-        holo = np.packbits(holo, axis = -1)[None, :, :]
-
-        seq = make_seq(dmd, holo, AlpDataFormat.BINARY_TOPDOWN, dmd_fps, 1)
-
+        self.shaper.upload_patterns(zs[None, :])
         self.cam.set_sync_out(True)
         self.cam.start_acquisition(1)
-        dmd.set_trigger(AlpTrigger.FALLING)
-        seq.start()
+        self.shaper.set_sync_in(True)
+        self.shaper.start()
 
         while self.cam.is_acquiring():
             time.sleep(0.1)
 
-        dmd.halt()
-        dmd.set_trigger(AlpTrigger.NONE)
-        seq.free()
+        self.shaper.free_patterns()
+        self.shaper.set_sync_in(False)
 
         frames = self.cam.stop_acquisition()
 
