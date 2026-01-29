@@ -1,6 +1,6 @@
 from dcam_backend import DcamBackend
+from dmd_backend import DmdBackend
 from shaping_system import ShapingSystem
-from alp4 import AlpError
 from pydantic import BaseModel, NonNegativeInt, conlist
 from enum import Enum
 from typing import Optional
@@ -12,31 +12,27 @@ import os
 
 
 
-class DmdConfig(BaseModel):
-    segments: int
-
 class HologramType(str, Enum):
     HASKELL = "haskell"
     SUPERPIXEL = "superpixel"
 
-class HologramConfig(BaseModel):
-    type: HologramType
-    order: NonNegativeInt
-    shifts: list[NonNegativeInt]
-
-class ReducerType(str, Enum):
-    BLOCK = "block"
-    SKIP = "skip"
+class DmdConfig(BaseModel):
+    segments: int
+    hologram_type: HologramType
+    hologram_order: NonNegativeInt
 
 class CameraConfig(BaseModel):
     roi: conlist(NonNegativeInt, min_length = 4, max_length = 4)
     exposure: float
     mask: Optional[str] = None
 
+class InterferometryConfig(BaseModel):
+    shifts: list[float]
+
 class Config(BaseModel):
     dmd: DmdConfig
-    hologram: HologramConfig
     camera: CameraConfig
+    interferometry: InterferometryConfig
 
 
 
@@ -44,9 +40,11 @@ def from_toml(path):
     config_data = tomllib.load(open(path, "rb"))
     config = Config.model_validate(config_data)
 
-    match config.hologram.type:
-        case "haskell": h = hologram.HaskellGenerator(config.hologram.order)
-        case "superpixel": h = hologram.SuperpixelGenerator(config.hologram.order)
+    match config.dmd.hologram_type:
+        case "haskell":
+            h = hologram.HaskellGenerator(config.dmd.hologram_order)
+        case "superpixel":
+            h = hologram.SuperpixelGenerator(config.dmd.hologram_order)
 
     if config.camera.mask is not None:
         mask_path = os.path.join(os.path.dirname(path), config.camera.mask)
@@ -59,25 +57,18 @@ def from_toml(path):
     else:
         mask = None
 
+    shifts = np.deg2rad(config.interferometry.shifts)
+
     print("Opening camera...")
 
     camera = DcamBackend(config.camera.roi, config.camera.exposure)
 
+    print("Opening DMD...")
+
+    shaper = DmdBackend(config.dmd.segments, 1000, h)
+
     print("Initialising system...")
 
-    try:
-        system = ShapingSystem(
-            camera,
-            config.dmd.segments,    # Input DOFs on the DMD
-            1000,                   # DMD FPS (>> camera FPS)
-            h,                      # Hologram generator
-            config.hologram.shifts, # Phase stepping shifts
-            mask
-        )
-    except AlpError as e:
-        print("Couldn't open DMD!")
-        print(*e.args)
-
-        exit(1)
+    system = ShapingSystem(camera, shaper, shifts, mask)
 
     return system

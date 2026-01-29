@@ -33,10 +33,7 @@ class InputFieldRecord:
 
 @dataclass
 class State:
-    # Things linked to the physical setup. The camera+DMD control system, and
-    # possibly a sequence handle if we're displaying something on the DMD.
     system: ShapingSystem
-    seq: AlpSequence | None = None
 
     # Data that can be manipulated/used by REPL commands
     ref_img: np.ndarray | None = None
@@ -45,6 +42,7 @@ class State:
     outputs: list[np.ndarray] = field(default_factory = list)
 
     # Miscellaneous flags and such
+    pattern_applied: bool = False
     quit: bool = False
 
 
@@ -106,9 +104,8 @@ def cmd_reference(state, args):
         print("Invalid integer")
         return
 
-    if state.seq is not None:
-        state.seq.free()
-        state.seq = None
+    if state.pattern_applied:
+        state.system.shaper.free_patterns()
 
     print("Capturing reference intensity image...")
 
@@ -122,9 +119,8 @@ def cmd_matrix(state, args):
         print("Must have a reference image first")
         return
 
-    if state.seq is not None:
-        state.seq.free()
-        state.seq = None
+    if state.pattern_applied:
+        state.system.shaper.free_patterns()
 
     tm = state.system.measure_tm(state.ref_img, progress = True)
     time = datetime.now()
@@ -195,10 +191,8 @@ def cmd_show(state, args):
             except IndexError:
                 print("TM index out of bounds")
         elif args[0] in ["input", "in"]:
-            template = state.system.template
-
             try:
-                imshow_complex(state.inputs[n].field[template])
+                imshow_complex(state.inputs[n].field[None, :])
                 plt.show()
             except IndexError:
                 print("Input field index out of bounds")
@@ -304,7 +298,7 @@ def cmd_generate(state, args):
         print("Usage: generate TYPE")
         return
 
-    n = state.system.segments
+    n = state.system.input_size
 
     if args[0] in ["gaussian", "gauss", "g"]:
         zs = np.random.normal(0, 1, n)*1j
@@ -335,20 +329,10 @@ def cmd_apply(state, args):
         print("Input field index out of bounds")
         return
 
-    template = state.system.template
-    hologen = state.system.hologen
-    holo = hologen.gen_from_template(template, input_field)
-    holo = np.packbits(holo, axis = -1)
-
     print("Uploading...")
 
-    if state.seq is not None:
-        state.seq.free()
-
-    state.seq = system.dmd.allocate_sequence(1, 1)
-    state.seq.set_format(AlpDataFormat.BINARY_TOPDOWN)
-    state.seq.put(0, 1, holo)
-    state.seq.start(continuous = True)
+    system.shaper.upload_patterns(input_field)
+    system.shaper.start(continuous = True)
 
 def cmd_measure(state, args):
     if state.ref_img is None:
@@ -374,6 +358,9 @@ def cmd_measure(state, args):
         case _:
             print("REDUCE? must be 'yes' or 'no'")
             return
+
+    if state.pattern_applied:
+        state.system.shaper.free_patterns()
 
     match args[1]:
         case "yes":
@@ -449,4 +436,4 @@ while not state.quit:
         print("Unknown command")
 
 system.cam.close()
-system.dmd.close()
+system.shaper.close()
