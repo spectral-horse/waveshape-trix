@@ -130,21 +130,25 @@ class ShapingSystem:
 
         return frames.mean(axis = 0)
 
+    def _upload_tm_patterns(self):
+        self.shaper.free_patterns()
+
+        mat = hadamard_mat(self.input_size)
+        zs = mat[:, None, :]*np.exp(1j*self.shifts)[:, None]
+        zs.shape = (-1, mat.shape[1])
+
+        self.shaper.upload_patterns(zs)
+
     # Measure a transmission matrix.
     #     ref: Full-size (unreduced/unmasked) reference intensity image
     #     progress: If True, print progress messages
     # Returns a complex 2D array of shape (w*h, segments) holding the TM.
     def measure_tm(self, ref, progress = False):
         if not self.just_measured_tm:
-            self.shaper.free_patterns()
-
-            mat = hadamard_mat(self.input_size)
-            zs = mat[:, None, :]*np.exp(1j*self.shifts)[:, None]
-            zs.shape = (-1, mat.shape[1])
-
             if progress: print("Uploading probe patterns...")
 
-            self.shaper.upload_patterns(zs)
+            self._upload_tm_patterns()
+            self.just_measured_tm = True
 
         if progress: print("Measuring...")
 
@@ -195,6 +199,7 @@ class ShapingSystem:
     def measure_field(self, zs, ref, reduce = True):
         if self.just_measured_tm:
             self.shaper.free_patterns()
+            self.just_measured_tm = False
 
         zs = np.exp(1j*self.shifts)[:, None]*zs
 
@@ -221,6 +226,7 @@ class ShapingSystem:
     def measure_intensity(self, zs, reduce = True):
         if self.just_measured_tm:
             self.shaper.free_patterns()
+            self.just_measured_tm = False
 
         self.shaper.upload_patterns(zs[None, :])
         self.cam.set_sync_out(True)
