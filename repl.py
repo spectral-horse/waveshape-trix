@@ -106,6 +106,7 @@ def cmd_reference(state, args):
 
     if state.pattern_applied:
         state.system.shaper.free_patterns()
+        state.pattern_applied = False
 
     print("Capturing reference intensity image...")
 
@@ -121,6 +122,7 @@ def cmd_matrix(state, args):
 
     if state.pattern_applied:
         state.system.shaper.free_patterns()
+        state.pattern_applied = False
 
     tm = state.system.measure_tm(state.ref_img, progress = True)
     time = datetime.now()
@@ -331,8 +333,11 @@ def cmd_apply(state, args):
 
     print("Uploading...")
 
-    system.shaper.upload_patterns(input_field)
-    system.shaper.start(continuous = True)
+    state.system.shaper.free_patterns()
+    state.system.shaper.upload_patterns(input_field)
+    state.system.shaper.start(continuous = True)
+
+    state.pattern_applied = True
 
 def cmd_measure(state, args):
     if state.ref_img is None:
@@ -361,6 +366,7 @@ def cmd_measure(state, args):
 
     if state.pattern_applied:
         state.system.shaper.free_patterns()
+        state.pattern_applied = False
 
     match args[1]:
         case "yes":
