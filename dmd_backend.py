@@ -35,6 +35,11 @@ class DmdBackend(ShaperBackend):
             self.dmd.set_trigger(AlpTrigger.FALLING)
 
     def upload_patterns(self, patterns):
+        if patterns.ndim == 1:
+            patterns = patterns[None, :]
+        elif patterns.ndim > 2:
+            raise ValueError("patterns array must have shape (D,) or (N, D)")
+
         holo = self.hologen.gen_from_template(self.template, patterns)
         holo = np.packbits(holo, axis = -1)
 

@@ -18,8 +18,8 @@ class ShaperBackend(ABC):
     @abstractmethod
     def upload_patterns(self, patterns: "ndarray"):
         # Upload N patterns of complex numbers to be displayed in order when
-        # projection is started. The pattern array should have shape (N, DOFs)
-        # and complex data type.
+        # projection is started. The pattern array should have shape (DOFs,) for
+        # a single pattern or (N, DOFs) for many, and complex data type.
         pass
 
     @abstractmethod
