@@ -10,3 +10,4 @@ mask = "mmf_mask.png"
 
 [interferometry]
 shifts = [0, 90, 180, 270]
+tm_probes = "hadamard"

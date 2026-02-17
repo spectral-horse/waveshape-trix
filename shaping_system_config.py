@@ -16,6 +16,10 @@ class HologramType(str, Enum):
     HASKELL = "haskell"
     SUPERPIXEL = "superpixel"
 
+class TmProbeType(str, Enum):
+    HADAMARD = "hadamard"
+    RANDOM_PHASE = "random_phase"
+
 class DmdConfig(BaseModel):
     segments: int
     hologram_type: HologramType
@@ -28,6 +32,7 @@ class CameraConfig(BaseModel):
 
 class InterferometryConfig(BaseModel):
     shifts: list[float]
+    tm_probes: TmProbeType
 
 class Config(BaseModel):
     dmd: DmdConfig
