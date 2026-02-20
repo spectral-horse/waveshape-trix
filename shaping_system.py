@@ -27,31 +27,31 @@ def buffer_to_ndarray(buf, crop = None):
 
     return img
 
-# Extract the complex field from a set of n intensity images, each w by h,
-# using the given phase retrieval matrix and reference intensity image.
+# Extract the complex field(s) from a set of n intensity images, each w by h,
+# using the given phase retrieval matrix and reference intensity image. The
+# phase matrix solves for a number of shifts, s, which n must be a multiple of.
 #     imgs : 3D array of shape (n, h, w) 
 #     ref : 2D array of shape (h, w)
-#     phase_mat : Inverse phase shifting matrix of shape (3, n)
-# Returns a 2D complex array of shape (h, w) holding the field.
+#     phase_mat : Inverse phase shifting matrix of shape (3, s)
+# Returns a complex array of shape (h, w) if only one field is extracted (n = s)
+# or of shape (n/s, h, w) if many are extracted.
 def extract_z(imgs, ref, phase_mat):
-    # Flattened images have shape (n, h*w), solution has shape (3, h, w)
-    imgs_flat = imgs.reshape(imgs.shape[0], -1)
-    sol = (phase_mat @ imgs_flat).reshape(3, *imgs.shape[1:])
+    s = phase_mat.shape[1]
+    n, *img_shape = imgs.shape
+    img_size = np.prod(img_shape)
+    sol = phase_mat @ imgs.reshape(n//s, s, img_size)
+    ref = ref.ravel()
 
     # Assuming no background in addition to reference
-    a1 = np.hypot(sol[1], sol[2])/(2*np.sqrt(ref))
-    a2 = np.sqrt(np.maximum(0, sol[0]-ref))
-    z = np.empty(imgs.shape[1:], dtype = "c16")
-    z.real = sol[1]
-    z.imag = sol[2]
+    a1 = np.hypot(sol[:, 1, :], sol[:, 2, :])/(2*np.sqrt(ref))
+    a2 = np.sqrt(np.maximum(0, sol[:, 0, :]-ref))
+    z = np.empty((n//s, img_size), dtype = "c16")
+    z.real = sol[:, 1, :]
+    z.imag = sol[:, 2, :]
     z *= (a1+a2)/(2*np.abs(z))
 
-    # Assuming a non-interfering background in addition to reference
-    #a = np.sqrt(np.maximum(0, sol[0]-ref))
-    #z = np.empty(imgs.shape[1:], dtype = "c16")
-    #z.real = sol[1]
-    #z.imag = sol[2]
-    #z *= a/np.abs(z)
+    if z.shape[0] == 1: z.shape = img_shape
+    else: z.shape = (n//s, *img_shape)
 
     return z
 
@@ -171,16 +171,11 @@ class ShapingSystem:
         self.shaper.set_sync_in(False)
 
         frames = self.cam.stop_acquisition()
-        tm = np.empty((self.output_size, self.input_size), dtype = "c16")
+        frames = self._apply_mask(frames)
+        ref = self._apply_mask(ref)
         phase_mat = gen_phase_mat(self.shifts)
-
-        for i in range(self.input_size):
-            frame_start = i*len(self.shifts)
-            frame_end = (i+1)*len(self.shifts)
-            field = extract_z(frames[frame_start:frame_end], ref, phase_mat)
-            field = self._apply_mask(field)
-
-            tm[:, i] = field.ravel()
+        fields = extract_z(frames, ref, phase_mat)
+        tm = fields.reshape(self.input_size, self.output_size).T
 
         # Correct for the fact that shift indices are all offset by an extra
         # phase factor, then do the change of basis back from Hadamard
