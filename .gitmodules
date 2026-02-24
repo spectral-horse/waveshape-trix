@@ -4,3 +4,6 @@
 [submodule "hologram"]
 	path = hologram
 	url = https://github.com/spectral-horse/binary-hologram-py.git
+[submodule "alp4"]
+	path = alp4
+	url = https://github.com/spectral-horse/alp4.git
