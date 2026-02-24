@@ -1,0 +1,6 @@
+[submodule "dcam"]
+	path = dcam
+	url = https://github.com/spectral-horse/dcam-py.git
+[submodule "hologram"]
+	path = hologram
+	url = https://github.com/spectral-horse/binary-hologram-py.git
