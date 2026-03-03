@@ -306,13 +306,27 @@ def cmd_measure(state, args):
 
 def cmd_save(state, args):
     try:
-        np.save(args.out_path, state.tms[args.n].mat)
+        if args.object in ["reference", "ref"]:
+            if state.ref_img is None:
+                print("No reference image to save")
+                return
+            
+            plt.imsave(args.out_path, state.ref_img, cmap = "gray", vmin = 0)
+        elif args.object in ["matrix", "mat"]:
+            np.save(args.out_path, state.tms[args.n].mat)
+        elif args.object in ["input", "in"]:
+            np.save(args.out_path, state.inputs[args.n].field)
+        elif args.object in ["output", "out"]:
+            np.save(args.out_path, state.outputs[args.n].field)
+        elif args.object == "mask":
+            if state.system.mask is None:
+                print("No mask set")
+                return
+
+            plt.imsave(args.out_path, state.system.mask, cmap = "gray")
     except IndexError:
-        print("Index out of range")
-        return
-    except Exception as e:
-        print("Failed to save array to file:")
-        print(e)
+        print("Index out of bounds")
+
 
 # --- REPL commands end ---
 
@@ -391,7 +405,15 @@ measure_cmd.add_argument("--masked", "-m", action = "store_true")
 save_cmd = subparsers.add_parser("save", aliases = ["sav"])
 save_cmd.set_defaults(func = cmd_save)
 save_cmd.add_argument("out_path")
-save_cmd.add_argument("n", type = int, default = -1, nargs = "?")
+save_subparsers = save_cmd.add_subparsers(dest = "object", required = True)
+save_reference_cmd = save_subparsers.add_parser("reference", aliases = ["ref"])
+save_mask_cmd = save_subparsers.add_parser("mask")
+save_matrix_cmd = save_subparsers.add_parser("matrix", aliases = ["mat"])
+save_matrix_cmd.add_argument("n", type = int, default = -1, nargs = "?")
+save_input_cmd = save_subparsers.add_parser("input", aliases = ["in"])
+save_input_cmd.add_argument("n", type = int, default = -1, nargs = "?")
+save_output_cmd = save_subparsers.add_parser("output", aliases = ["out"])
+save_output_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 
 
 
