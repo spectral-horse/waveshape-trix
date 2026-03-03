@@ -86,16 +86,32 @@ class ShapingSystem:
     #     shifts: Phase shifts for interferometric stepping
     #     mask:   Optional 2D boolean array to select output pixels
     def __init__(self, camera, shaper, shifts, mask = None):
-        if mask is not None and mask.dtype != bool:
-            raise ValueError("mask must be a 2D boolean array")
-
         self.shaper = shaper
         self.cam = camera
         self.roi = camera.get_roi()
         self.shifts = np.array(shifts)
         self.mask = mask
-        self.mask_sum = mask.sum()
         self.just_measured_tm = False
+
+    @property
+    def mask(self):
+        if self.mask_img is None: return None
+
+        view = self.mask_img
+        view.flags.writeable = False
+
+        return view
+
+    @mask.setter
+    def mask(self, new_mask):
+        if new_mask is None:
+            self.mask_img = None
+            sefl.mask_sum = None
+        elif new_mask.dtype != bool or new_mask.ndim != 2:
+            raise ValueError("mask must be a 2D boolean array")
+        else:
+            self.mask_img = new_mask
+            self.mask_sum = new_mask.sum()
 
     @property
     def input_size(self):
@@ -103,17 +119,17 @@ class ShapingSystem:
 
     @property
     def output_shape(self):
-        if self.mask is None: return self.roi[2:]
+        if self.mask_img is None: return self.roi[2:]
         else: return (self.mask_sum,)
 
     @property
     def output_size(self):
-        if self.mask is None: return self.roi[2]*self.roi[3]
+        if self.mask_img is None: return self.roi[2]*self.roi[3]
         else: return self.mask_sum
 
     def _apply_mask(self, imgs):
-        if self.mask is None: return imgs
-        else: return imgs[..., self.mask]
+        if self.mask_img is None: return imgs
+        else: return imgs[..., self.mask_img]
 
     # Measure the reference beam intensity with no pattern on the DMD.
     #     n_images - Number of shots to take

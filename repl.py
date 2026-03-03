@@ -182,6 +182,14 @@ def cmd_show(state, args):
             imshow_complex(state.inputs[args.n].field[None, :])
         elif args.object in ["output", "out"]:
             imshow_complex(state.outputs[args.n])
+        elif args.object == "mask":
+            if state.system.mask is None:
+                print("No mask set")
+                return
+
+            plt.scatter(*np.nonzero(state.system.mask))
+            plt.xlim(0, state.system.roi[2])
+            plt.ylim(0, state.system.roi[3])
 
         plt.show()
     except IndexError:
@@ -341,6 +349,7 @@ show_cmd = subparsers.add_parser("show")
 show_cmd.set_defaults(func = cmd_show)
 show_subparsers = show_cmd.add_subparsers(dest = "object", required = True)
 show_reference_cmd = show_subparsers.add_parser("reference", aliases = ["ref"])
+show_mask_cmd = show_subparsers.add_parser("mask")
 show_matrix_cmd = show_subparsers.add_parser("matrix", aliases = ["mat"])
 show_matrix_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 show_input_cmd = show_subparsers.add_parser("input", aliases = ["in"])
