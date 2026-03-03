@@ -315,7 +315,7 @@ print("Loading config & setting up...")
 system = shaping_system_config.from_toml(args.config)
 state = State(system = system)
 
-parser = ArgumentParser(exit_on_error = False)
+parser = ArgumentParser(prog = "", exit_on_error = False)
 subparsers = parser.add_subparsers(required = True)
 
 quit_cmd = subparsers.add_parser("quit", aliases = ["q"])
@@ -399,6 +399,8 @@ while not state.quit:
         print(e.message)
     except ArgumentTypeError as e:
         print(*e.args)
+    except SystemExit:
+        pass
 
 system.cam.close()
 system.shaper.close()
