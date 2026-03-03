@@ -317,7 +317,7 @@ def cmd_save(state, args):
         elif args.object in ["input", "in"]:
             np.save(args.out_path, state.inputs[args.n].field)
         elif args.object in ["output", "out"]:
-            np.save(args.out_path, state.outputs[args.n].field)
+            np.save(args.out_path, state.outputs[args.n])
         elif args.object == "mask":
             if state.system.mask is None:
                 print("No mask set")
@@ -327,6 +327,32 @@ def cmd_save(state, args):
     except IndexError:
         print("Index out of bounds")
 
+def cmd_mask(state, args):
+    try:
+        img1 = np.abs(state.outputs[args.img1])
+        img2 = np.abs(state.outputs[args.img2])
+    except IndexError:
+        print("Index out of bounds")
+        return
+
+    if img1.shape != img2.shape:
+        print("Images must have the same shape")
+        return
+
+    if img1.ndim != 2:
+        print("Images must be 2D")
+        return
+
+    combo = np.minimum(img1, img2)
+    xx, yy = np.meshgrid(*map(np.arange, combo.shape[::-1]))
+    mask = np.zeros(combo.shape, dtype = bool)
+
+    for _ in range(args.n_points):
+        pos = np.unravel_index(combo.argmax(), combo.shape)
+        mask[pos] = True
+        combo[np.hypot(xx-pos[1], yy-pos[0]) < args.radius] = 0
+
+    state.system.mask = mask
 
 # --- REPL commands end ---
 
@@ -414,6 +440,15 @@ save_input_cmd = save_subparsers.add_parser("input", aliases = ["in"])
 save_input_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 save_output_cmd = save_subparsers.add_parser("output", aliases = ["out"])
 save_output_cmd.add_argument("n", type = int, default = -1, nargs = "?")
+
+mask_cmd = subparsers.add_parser("mask")
+mask_cmd.set_defaults(func = cmd_mask)
+mask_subparsers = mask_cmd.add_subparsers(dest = "action", required = True)
+mask_common_cmd = mask_subparsers.add_parser("common")
+mask_common_cmd.add_argument("n_points", type = positive_int)
+mask_common_cmd.add_argument("img1", type = int, default = -2, nargs = "?")
+mask_common_cmd.add_argument("img2", type = int, default = -1, nargs = "?")
+mask_common_cmd.add_argument("--radius", "-r", type = float, default = 10.0)
 
 
 
