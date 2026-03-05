@@ -111,16 +111,29 @@ def cmd_quit(state, args):
     state.quit = True
 
 def cmd_reference(state, args):
-    if state.pattern_applied:
-        state.system.shaper.free_patterns()
-        state.pattern_applied = False
+    if args.action in ["autoreference", "auto"]:
+        if args.enabled == "on":
+            state.system.self_referencing = True
+        elif args.enabled == "off":
+            state.system.self_referencing = False
+        elif args.enabled == "toggle":
+            state.system.self_referencing = not state.system.self_referencing
+            enabled = "on" if state.system.self_referencing else "off"
 
-    print("Capturing reference intensity image...")
+            print("Toggled self-referencing", enabled)
+        
+        return
+    elif args.action == "take":
+        if state.pattern_applied:
+            state.system.shaper.free_patterns()
+            state.pattern_applied = False
 
-    state.ref_img = state.system.measure_reference(args.n)
-    h, w = state.ref_img.shape
+        print("Capturing reference intensity image...")
 
-    print(f"Done ({w}x{h})")
+        state.ref_img = state.system.measure_reference(args.n)
+        h, w = state.ref_img.shape
+
+        print(f"Done ({w}x{h})")
 
 def cmd_matrix(state, args):
     if state.ref_img is None:
@@ -369,9 +382,16 @@ subparsers = parser.add_subparsers(required = True)
 quit_cmd = subparsers.add_parser("quit", aliases = ["q"])
 quit_cmd.set_defaults(func = cmd_quit)
 
-reference_cmd = subparsers.add_parser("reference", aliases = ["ref"])
-reference_cmd.set_defaults(func = cmd_reference)
-reference_cmd.add_argument("-n", type = positive_int, default = 100)
+ref_cmd = subparsers.add_parser("reference", aliases = ["ref"])
+ref_cmd.set_defaults(func = cmd_reference)
+ref_subparsers = ref_cmd.add_subparsers(dest = "action", required = True)
+ref_take_cmd = ref_subparsers.add_parser("take")
+ref_take_cmd.add_argument("n", type = positive_int, default = 100, nargs = "?")
+ref_auto_cmd = ref_subparsers.add_parser("autoreference", aliases = ["auto"])
+ref_auto_cmd.add_argument(
+    "enabled", default = "toggle", nargs = "?",
+    choices = ["on", "off", "toggle"]
+)
 
 matrix_cmd = subparsers.add_parser("matrix", aliases = ["mat"])
 matrix_cmd.set_defaults(func = cmd_matrix)

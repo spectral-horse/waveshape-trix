@@ -92,6 +92,19 @@ class ShapingSystem:
         self.shifts = np.array(shifts)
         self.mask = mask
         self.just_measured_tm = False
+        self._self_referencing = False
+
+    @property
+    def self_referencing(self):
+        return self._self_referencing
+
+    @self_referencing.setter
+    def self_referencing(self, enabled):
+        if self._self_referencing != enabled and self.just_measured_tm:
+            self.shaper.free_patterns()
+            self.just_measured_tm = False
+
+        self._self_referencing = enabled
 
     @property
     def mask(self):
@@ -132,10 +145,19 @@ class ShapingSystem:
         else: return imgs[..., self.mask_img]
 
     # Measure the reference beam intensity with no pattern on the DMD.
-    #     n_images - Number of shots to take
+    #     n_images: Number of shots to take
     # Returns the mean intensity image over the specified number of shots. This
     # will NOT be reduced using the system's mask.
     def measure_reference(self, n_images):
+        if self._self_referencing:
+            if self.just_measured_tm:
+                self.shaper.free_patterns()
+                self.just_measured_tm = False
+
+            self.shaper.upload_patterns(np.ones(self.input_size))
+            self.shaper.set_sync_in(False)
+            self.shaper.start(continuous = True)
+
         self.cam.set_sync_out(False)
         self.cam.start_acquisition(n_images)
 
@@ -143,6 +165,8 @@ class ShapingSystem:
             time.sleep(0.1)
 
         frames = self.cam.stop_acquisition()
+
+        if self._self_referencing: self.shaper.stop()
 
         return frames.mean(axis = 0)
 
@@ -152,6 +176,8 @@ class ShapingSystem:
         mat = hadamard_mat(self.input_size)
         zs = mat[:, None, :]*np.exp(1j*self.shifts)[:, None]
         zs.shape = (-1, mat.shape[1])
+
+        if self._self_referencing: zs = (zs+1)/2
 
         self.shaper.upload_patterns(zs)
 
@@ -213,6 +239,8 @@ class ShapingSystem:
             self.just_measured_tm = False
 
         zs = np.exp(1j*self.shifts)[:, None]*zs
+
+        if self._self_referencing: zs = (zs+1)/2
 
         self.shaper.upload_patterns(zs)
         self.cam.set_sync_out(True)
