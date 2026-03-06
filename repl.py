@@ -111,7 +111,7 @@ def cmd_quit(state, args):
     state.quit = True
 
 def cmd_reference(state, args):
-    if args.action in ["autoreference", "auto"]:
+    if args.action == "autoreference":
         if args.enabled == "on":
             state.system.self_referencing = True
         elif args.enabled == "off":
@@ -183,17 +183,17 @@ def cmd_clear(state, args):
 
 def cmd_show(state, args):
     try:
-        if args.object in ["reference", "ref"]:
+        if args.object == "reference":
             if state.ref_img is None:
                 print("No reference image to show")
                 return
             
             plt.imshow(state.ref_img, vmin = 0)
-        elif args.object in ["matrix", "mat"]:
+        elif args.object == "matrix":
             imshow_complex(state.tms[args.n].mat)
-        elif args.object in ["input", "in"]:
+        elif args.object == "input":
             imshow_complex(state.inputs[args.n].field[None, :])
-        elif args.object in ["output", "out"]:
+        elif args.object == "output":
             imshow_complex(state.outputs[args.n])
         elif args.object == "mask":
             if state.system.mask is None:
@@ -263,7 +263,7 @@ def cmd_exposure(state, args):
 def cmd_generate(state, args):
     n = state.system.input_size
 
-    if args.type in ["gaussian", "gauss"]:
+    if args.type == "gaussian":
         zs = np.random.normal(0, 1, n)*1j
         zs += np.random.normal(0, 1, n)
         zs /= np.abs(zs).max()
@@ -271,10 +271,29 @@ def cmd_generate(state, args):
         name = "Generated (gaussian)"
 
         state.inputs.append(InputFieldRecord(zs, name))
-    elif args.type in ["ones", "one", "1"]:
+    elif args.type == "ones":
         name = "Generated (ones)"
 
         state.inputs.append(InputFieldRecord(np.ones(n), name))
+    elif args.type == "focus":
+        try:
+            tm = state.tms[args.matrix_n].mat
+        except IndexError:
+            print("Matrix index out of bounds")
+            return
+
+        try:
+            target = np.zeros(state.system.output_size)
+            target[args.pixel_index] = 1
+        except IndexError:
+            print("Pixel index out of bounds")
+            return
+
+        field = np.linalg.lstsq(tm, target)[0]
+        field /= np.abs(field).max()
+        name = f"Generated (focus at output pixel {args.pixel_index})"
+
+        state.inputs.append(InputFieldRecord(field, name))
 
 def cmd_apply(state, args):
     try:
@@ -319,17 +338,17 @@ def cmd_measure(state, args):
 
 def cmd_save(state, args):
     try:
-        if args.object in ["reference", "ref"]:
+        if args.object == "reference":
             if state.ref_img is None:
                 print("No reference image to save")
                 return
             
             plt.imsave(args.out_path, state.ref_img, cmap = "gray", vmin = 0)
-        elif args.object in ["matrix", "mat"]:
+        elif args.object == "matrix":
             np.save(args.out_path, state.tms[args.n].mat)
-        elif args.object in ["input", "in"]:
+        elif args.object == "input":
             np.save(args.out_path, state.inputs[args.n].field)
-        elif args.object in ["output", "out"]:
+        elif args.object == "output":
             np.save(args.out_path, state.outputs[args.n])
         elif args.object == "mask":
             if state.system.mask is None:
@@ -384,10 +403,12 @@ quit_cmd.set_defaults(func = cmd_quit)
 
 ref_cmd = subparsers.add_parser("reference", aliases = ["ref"])
 ref_cmd.set_defaults(func = cmd_reference)
-ref_subparsers = ref_cmd.add_subparsers(dest = "action", required = True)
+ref_subparsers = ref_cmd.add_subparsers(required = True)
 ref_take_cmd = ref_subparsers.add_parser("take")
+ref_take_cmd.set_defaults(action = "take")
 ref_take_cmd.add_argument("n", type = positive_int, default = 100, nargs = "?")
 ref_auto_cmd = ref_subparsers.add_parser("autoreference", aliases = ["auto"])
+ref_auto_cmd.set_defaults(action = "autoreference")
 ref_auto_cmd.add_argument(
     "enabled", default = "toggle", nargs = "?",
     choices = ["on", "off", "toggle"]
@@ -407,14 +428,19 @@ clear_cmd.add_argument("--inputs", "-i", action = "store_true")
 
 show_cmd = subparsers.add_parser("show")
 show_cmd.set_defaults(func = cmd_show)
-show_subparsers = show_cmd.add_subparsers(dest = "object", required = True)
+show_subparsers = show_cmd.add_subparsers(required = True)
 show_reference_cmd = show_subparsers.add_parser("reference", aliases = ["ref"])
+show_reference_cmd.set_defaults(object = "reference")
 show_mask_cmd = show_subparsers.add_parser("mask")
+show_mask_cmd.set_defaults(object = "mask")
 show_matrix_cmd = show_subparsers.add_parser("matrix", aliases = ["mat"])
+show_matrix_cmd.set_defaults(object = "matrix")
 show_matrix_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 show_input_cmd = show_subparsers.add_parser("input", aliases = ["in"])
+show_input_cmd.set_defaults(object = "input")
 show_input_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 show_output_cmd = show_subparsers.add_parser("output", aliases = ["out"])
+show_output_cmd.set_defaults(object = "output")
 show_output_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 
 revival_cmd = subparsers.add_parser("revival", aliases = ["rev"])
@@ -434,9 +460,15 @@ exposure_cmd.add_argument("exposure", type = positive_float, nargs = "?")
 
 gen_cmd = subparsers.add_parser("generate", aliases = ["gen"])
 gen_cmd.set_defaults(func = cmd_generate)
-gen_subparsers = gen_cmd.add_subparsers(dest = "type", required = True)
+gen_subparsers = gen_cmd.add_subparsers(required = True)
 gen_gaussian_cmd = gen_subparsers.add_parser("gaussian", aliases = ["gauss"])
+gen_gaussian_cmd.set_defaults(type = "gaussian")
 gen_ones_cmd = gen_subparsers.add_parser("ones", aliases = ["one", "1"])
+gen_ones_cmd.set_defaults(type = "ones")
+gen_focus_cmd = gen_subparsers.add_parser("focus")
+gen_focus_cmd.set_defaults(type = "focus")
+gen_focus_cmd.add_argument("pixel_index", type = int)
+gen_focus_cmd.add_argument("matrix_n", type = int, default = -1, nargs = "?")
 
 apply_cmd = subparsers.add_parser("apply")
 apply_cmd.set_defaults(func = cmd_apply)
@@ -451,20 +483,26 @@ measure_cmd.add_argument("--masked", "-m", action = "store_true")
 save_cmd = subparsers.add_parser("save", aliases = ["sav"])
 save_cmd.set_defaults(func = cmd_save)
 save_cmd.add_argument("out_path")
-save_subparsers = save_cmd.add_subparsers(dest = "object", required = True)
+save_subparsers = save_cmd.add_subparsers(required = True)
 save_reference_cmd = save_subparsers.add_parser("reference", aliases = ["ref"])
+save_reference_cmd.set_defaults(object = "reference")
 save_mask_cmd = save_subparsers.add_parser("mask")
+save_mask_cmd.set_defaults(object = "mask")
 save_matrix_cmd = save_subparsers.add_parser("matrix", aliases = ["mat"])
+save_matrix_cmd.set_defaults(object = "matrix")
 save_matrix_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 save_input_cmd = save_subparsers.add_parser("input", aliases = ["in"])
+save_input_cmd.set_defaults(object = "input")
 save_input_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 save_output_cmd = save_subparsers.add_parser("output", aliases = ["out"])
+save_output_cmd.set_defaults(object = "output")
 save_output_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 
 mask_cmd = subparsers.add_parser("mask")
 mask_cmd.set_defaults(func = cmd_mask)
-mask_subparsers = mask_cmd.add_subparsers(dest = "action", required = True)
+mask_subparsers = mask_cmd.add_subparsers(required = True)
 mask_common_cmd = mask_subparsers.add_parser("common")
+mask_common_cmd.set_defaults(action = "common")
 mask_common_cmd.add_argument("n_points", type = positive_int)
 mask_common_cmd.add_argument("img1", type = int, default = -2, nargs = "?")
 mask_common_cmd.add_argument("img2", type = int, default = -1, nargs = "?")
