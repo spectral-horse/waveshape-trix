@@ -247,7 +247,7 @@ def cmd_video(state, args):
     print("  Data type:", frames.dtype)
 
     try:
-        ffmpeg_write(frames, fps, out_path)
+        ffmpeg_write(frames, fps, args.out_path)
     except RuntimeError as e:
         print("Video write failed:")
         print(*e.args)
