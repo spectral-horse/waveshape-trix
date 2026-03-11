@@ -311,7 +311,7 @@ def cmd_apply(state, args):
     state.pattern_applied = True
 
 def cmd_measure(state, args):
-    if state.ref_img is None:
+    if not args.intensity and state.ref_img is None:
         print("Must have a reference image first")
         return
 
