@@ -48,13 +48,19 @@ class State:
 
 
 # Field distance revival operator
-def revival_field(tm1, tm2):
-    diff = tm2-tm1
-    _, _, vh = np.linalg.svd(diff)
-    null_dim = tm1.shape[1]-tm1.shape[0]
-    null_basis = vh.conj().T[:, -null_dim:]
+def revival_field(*tms):
+    tms = np.array(tms)
+    diffs = (tms[1:]-tms[0]).reshape(-1, tms[0].shape[1])
+    _, _, vh = np.linalg.svd(diffs)
+    null_dim = diffs.shape[1]-diffs.shape[0]
 
-    _, _, vh = np.linalg.svd(tm1 @ null_basis)
+    if null_dim <= 0:
+        n = len(tms)
+
+        raise ValueError(f"{n}-TM revival requires cols > {n-1}*rows")
+
+    null_basis = vh.conj().T[:, -null_dim:]
+    _, _, vh = np.linalg.svd(tms[0] @ null_basis)
     field = null_basis @ vh.conj()[0]
     field /= np.abs(field).max()
 
@@ -210,13 +216,13 @@ def cmd_show(state, args):
 
 def cmd_revival(state, args):
     try:
-        tm1 = state.tms[args.n1].mat
-        tm2 = state.tms[args.n2].mat
+        ns = [args.n0]+args.n
+        tms = [ state.tms[n].mat for n in ns ]
     except IndexError:
         print("TM index out of bounds")
         return
 
-    record = InputFieldRecord(revival_field(tm1, tm2), "Revival")
+    record = InputFieldRecord(revival_field(*tms), "Revival")
 
     state.inputs.append(record)
 
@@ -361,21 +367,24 @@ def cmd_save(state, args):
 
 def cmd_mask(state, args):
     try:
-        img1 = np.abs(state.outputs[args.img1])
-        img2 = np.abs(state.outputs[args.img2])
+        imgs = [ state.outputs[n] for n in args.imgs ]
     except IndexError:
         print("Index out of bounds")
         return
 
-    if img1.shape != img2.shape:
-        print("Images must have the same shape")
-        return
-
-    if img1.ndim != 2:
+    if imgs[0].ndim != 2:
         print("Images must be 2D")
         return
 
-    combo = np.minimum(img1, img2)
+    combo = np.full(imgs[0].shape, np.finfo(float).max)
+
+    for img in imgs:
+        if img.shape != combo.shape:
+            print("Images must have the same shape")
+            return
+
+        combo = np.minimum(np.abs(img), combo)
+
     xx, yy = np.meshgrid(*map(np.arange, combo.shape[::-1]))
     mask = np.zeros(combo.shape, dtype = bool)
 
@@ -445,8 +454,8 @@ show_output_cmd.add_argument("n", type = int, default = -1, nargs = "?")
 
 revival_cmd = subparsers.add_parser("revival", aliases = ["rev"])
 revival_cmd.set_defaults(func = cmd_revival)
-revival_cmd.add_argument("n1", type = int, default = -2, nargs = "?")
-revival_cmd.add_argument("n2", type = int, default = -1, nargs = "?")
+revival_cmd.add_argument("n0", type = int, default = -1, nargs = "?")
+revival_cmd.add_argument("n", type = int, default = [-2], nargs = "*")
 
 video_cmd = subparsers.add_parser("video")
 video_cmd.set_defaults(func = cmd_video)
@@ -504,8 +513,7 @@ mask_subparsers = mask_cmd.add_subparsers(required = True)
 mask_common_cmd = mask_subparsers.add_parser("common")
 mask_common_cmd.set_defaults(action = "common")
 mask_common_cmd.add_argument("n_points", type = positive_int)
-mask_common_cmd.add_argument("img1", type = int, default = -2, nargs = "?")
-mask_common_cmd.add_argument("img2", type = int, default = -1, nargs = "?")
+mask_common_cmd.add_argument("imgs", type = int, default = [-1], nargs = "+")
 mask_common_cmd.add_argument("--radius", "-r", type = float, default = 10.0)
 
 
